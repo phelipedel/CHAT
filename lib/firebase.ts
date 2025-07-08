@@ -53,6 +53,12 @@ export const setupUserPresence = (userId: string) => {
 // Função para adicionar logs do sistema
 export const addSystemLog = async (level: 'INFO' | 'ERROR' | 'WARNING', message: string, details?: any) => {
   try {
+    // Verificar se o usuário está autenticado antes de tentar escrever logs
+    if (!auth.currentUser) {
+      console.warn('Tentativa de adicionar log sem usuário autenticado:', message);
+      return;
+    }
+
     const { addDoc, collection } = await import('firebase/firestore');
     await addDoc(collection(db, 'logs'), {
       level,
