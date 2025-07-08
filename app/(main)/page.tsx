@@ -745,38 +745,13 @@ export default function ChatPage() {
                     </SelectItem>
                   </SelectContent>
                 </Select>
-                <Select value={statusMode} onValueChange={(value: 'online' | 'offline' | 'hidden' | 'away') => setStatusMode(value)}>
-                  <SelectTrigger className="bg-gray-700 border-gray-600 text-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-gray-800 border-gray-600">
-                    <SelectItem value="online" className="text-white hover:bg-gray-700">
-                      <div className="flex items-center gap-2">
-                        <Circle className="h-3 w-3 fill-green-500 text-green-500" />
-                        Online
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="away" className="text-white hover:bg-gray-700">
-                      <div className="flex items-center gap-2">
-                        <Clock className="h-3 w-3 text-yellow-500" />
-                        Ausente
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="hidden" className="text-white hover:bg-gray-700">
-                      <div className="flex items-center gap-2">
-                        <Eye className="h-3 w-3 text-gray-500" />
-                        Oculto
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="offline" className="text-white hover:bg-gray-700">
-                      <div className="flex items-center gap-2">
-                        <Circle className="h-3 w-3 fill-gray-500 text-gray-500" />
-                        Offline
-                      </div>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
               </div>
+              <Input
+                value={newPhotoURL}
+                onChange={(e) => setNewPhotoURL(e.target.value)}
+                placeholder="URL da foto"
+                className="bg-gray-700 border-gray-600 text-white"
+              />
               <div className="flex gap-2">
                 <Button 
                   size="sm" 

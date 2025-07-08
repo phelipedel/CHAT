@@ -5,7 +5,7 @@ import { Shield, Star, CheckCircle, Zap } from 'lucide-react';
 
 interface UserTagsProps {
   tags: string[];
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'sm' | 'md';
 }
 
 const tagConfig = {
@@ -31,7 +31,7 @@ const tagConfig = {
   }
 };
 
-export function UserTags({ tags, size = 'md' }: UserTagsProps) {
+export function UserTags({ tags, size = 'sm' }: UserTagsProps) {
   if (!tags || tags.length === 0) return null;
 
   const sizeClasses = {
@@ -40,14 +40,10 @@ export function UserTags({ tags, size = 'md' }: UserTagsProps) {
     lg: 'text-sm px-2.5 py-1'
   };
 
-  const iconSizes = {
-    sm: 'h-2.5 w-2.5',
-    md: 'h-3 w-3',
-    lg: 'h-3.5 w-3.5'
-  };
+  const iconSize = size === 'sm' ? 'h-3 w-3' : 'h-4 w-4';
 
   return (
-    <div className="flex gap-1 flex-wrap">
+    <div className="flex items-center gap-0.5">
       {tags.map((tag) => {
         const config = tagConfig[tag as keyof typeof tagConfig];
         if (!config) return null;
@@ -57,11 +53,10 @@ export function UserTags({ tags, size = 'md' }: UserTagsProps) {
         return (
           <Badge
             key={tag}
-            className={`${config.color} ${sizeClasses[size]} flex items-center gap-1 font-medium`}
+            className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-white ${config.bgColor}`}
             title={config.label}
           >
-            <Icon className={iconSizes[size]} />
-            {tag}
+            <Icon className={iconSize} />
           </Badge>
         );
       })}
