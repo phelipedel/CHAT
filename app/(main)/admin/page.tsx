@@ -377,6 +377,12 @@ export default function ChatPage() {
   const updateUserTags = async () => {
     if (!selectedUser) return;
 
+    // Validação: apenas admins podem adicionar tag ADM
+    if (selectedTags.includes('ADM') && !user?.isAdmin) {
+      alert('Apenas administradores podem atribuir a tag ADM');
+      return;
+    }
+
     try {
       await updateDoc(doc(db, 'users', selectedUser.uid), {
         tags: selectedTags
@@ -982,6 +988,10 @@ export default function ChatPage() {
                         checked={selectedTags.includes(tag)}
                         onCheckedChange={(checked) => {
                           if (checked) {
+                            if (tag === 'ADM' && !user?.isAdmin) {
+                              alert('Apenas administradores podem atribuir a tag ADM');
+                              return;
+                            }
                             setSelectedTags(prev => [...prev, tag]);
                           } else {
                             setSelectedTags(prev => prev.filter(t => t !== tag));
@@ -992,9 +1002,6 @@ export default function ChatPage() {
                       <Label htmlFor={tag} className="text-white text-sm flex items-center gap-2">
                         <UserTags tags={[tag]} size="sm" />
                         {tag}
-                        {tag === 'ADM' && !user?.isAdmin && (
-                          <span className="text-xs text-gray-500">(Apenas admins)</span>
-                        )}
                       </Label>
                     </div>
                   ))}
@@ -1004,6 +1011,7 @@ export default function ChatPage() {
               <div className="flex gap-2">
                 <Button
                   onClick={updateUserTags}
+                  disabled={selectedTags.includes('ADM') && !user?.isAdmin}
                   className="flex-1 bg-white text-black hover:bg-gray-200"
                 >
                   Salvar Tags

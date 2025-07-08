@@ -93,3 +93,27 @@
 .scrollbar-hide::-webkit-scrollbar {
   display: none;  /* Chrome, Safari and Opera */
 }
+
+/* Melhorias de responsividade */
+@media (max-width: 640px) {
+  .min-h-screen {
+    min-height: 100vh;
+    min-height: 100dvh; /* Para dispositivos móveis modernos */
+  }
+  
+  /* Garantir que o chat ocupe toda a altura disponível */
+  .mobile-chat-container {
+    height: 100vh;
+    height: 100dvh;
+  }
+}
+
+/* Melhorar performance de scroll em dispositivos móveis */
+.scrollbar-hide {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Garantir que elementos flexíveis não quebrem em telas pequenas */
+.flex-1 {
+  min-width: 0;
+}

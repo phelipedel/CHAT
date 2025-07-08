@@ -1,9 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
-import { Users } from 'lucide-react';
+import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import { Users, X } from 'lucide-react';
 
 interface MobileFriendsDrawerProps {
   children: React.ReactNode;
@@ -14,25 +14,33 @@ export function MobileFriendsDrawer({ children, friendsCount }: MobileFriendsDra
   const [open, setOpen] = useState(false);
 
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="sm:hidden fixed top-4 left-4 z-50 bg-gray-900 text-white hover:bg-gray-800 border border-gray-700"
-        >
-          <Users className="h-4 w-4 mr-2" />
-          Amigos ({friendsCount})
-        </Button>
-      </SheetTrigger>
-      <SheetContent side="left" className="w-80 p-0 bg-gray-900 border-gray-700">
-        <SheetHeader className="p-4 border-b border-gray-700">
-          <SheetTitle className="text-white">Amigos</SheetTitle>
-        </SheetHeader>
-        <div className="h-full overflow-hidden">
+    <div className="sm:hidden">
+      <Sheet open={open} onOpenChange={setOpen}>
+        <SheetTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="fixed top-4 left-4 z-40 bg-gray-900 border border-gray-700 text-white hover:bg-gray-800"
+          >
+            <Users className="h-4 w-4 mr-2" />
+            Amigos ({friendsCount})
+          </Button>
+        </SheetTrigger>
+        <SheetContent side="left" className="w-80 p-0 bg-gray-900 border-gray-700">
+          <div className="flex items-center justify-between p-4 border-b border-gray-700">
+            <h2 className="text-white font-semibold">Amigos</h2>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setOpen(false)}
+              className="text-gray-400 hover:text-white hover:bg-gray-800"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
           {children}
-        </div>
-      </SheetContent>
-    </Sheet>
+        </SheetContent>
+      </Sheet>
+    </div>
   );
 }

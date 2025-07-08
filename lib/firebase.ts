@@ -1,7 +1,7 @@
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { getDatabase, ref, onDisconnect, set, onValue } from 'firebase/database';
+import { getDatabase, ref, onDisconnect, set, onValue, serverTimestamp as rtdbServerTimestamp } from 'firebase/database';
 import { APP_CONFIG } from './config';
 
 // Inicializar Firebase (evitar múltiplas inicializações)
@@ -12,17 +12,17 @@ export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const rtdb = getDatabase(app);
 
-// Função para gerenciar status de presença do usuário
-export const setupUserPresence = (userId: string) => {
+// Função para gerenciar status de presença do usuário com opções de visibilidade
+export const setupUserPresence = (userId: string, statusMode: 'online' | 'offline' | 'hidden' | 'away' = 'online') => {
   const userStatusRef = ref(rtdb, `/status/${userId}`);
   const isOfflineForDatabase = {
     state: 'offline',
-    last_changed: serverTimestamp(),
+    last_changed: rtdbServerTimestamp(),
   };
 
-  const isOnlineForDatabase = {
-    state: 'online',
-    last_changed: serverTimestamp(),
+  const currentStatusForDatabase = {
+    state: statusMode,
+    last_changed: rtdbServerTimestamp(),
   };
 
   // Configurar presença no Realtime Database
@@ -33,7 +33,7 @@ export const setupUserPresence = (userId: string) => {
     }
 
     onDisconnect(userStatusRef).set(isOfflineForDatabase).then(() => {
-      set(userStatusRef, isOnlineForDatabase);
+      set(userStatusRef, currentStatusForDatabase);
     });
   });
 
@@ -48,6 +48,17 @@ export const setupUserPresence = (userId: string) => {
       }).catch(console.error);
     }
   });
+};
+
+// Função para atualizar status do usuário manualmente
+export const updateUserStatus = (userId: string, status: 'online' | 'offline' | 'hidden' | 'away') => {
+  const userStatusRef = ref(rtdb, `/status/${userId}`);
+  const statusData = {
+    state: status,
+    last_changed: rtdbServerTimestamp(),
+  };
+  
+  return set(userStatusRef, statusData);
 };
 
 // Função para adicionar logs do sistema

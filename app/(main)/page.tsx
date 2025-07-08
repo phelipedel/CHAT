@@ -22,7 +22,7 @@ import { signOut } from 'firebase/auth';
 import { auth, db } from '@/lib/firebase';
 import { isAdminUID } from '@/lib/config';
 import { encryptMessage, decryptMessage } from '@/lib/encryption';
-import { setupUserPresence, addSystemLog, rtdb } from '@/lib/firebase';
+import { setupUserPresence, addSystemLog, rtdb, updateUserStatus } from '@/lib/firebase';
 import { generateUserID, isValidUserID } from '@/lib/utils';
 import { UserTags } from '@/components/ui/user-tags';
 import { MobileFriendsDrawer } from '@/components/ui/mobile-friends-drawer';
@@ -30,7 +30,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { 
   Send, 
@@ -48,8 +48,10 @@ import {
   Copy,
   Check,
   Circle,
+  Wifi,
+  WifiOff,
   Eye,
-  EyeOff
+  Clock
 } from 'lucide-react';
 import { ref, onValue } from 'firebase/database';
 
@@ -73,7 +75,7 @@ interface User {
   userID: string;
   friends: string[];
   tags?: string[];
-  hideOnlineStatus?: boolean;
+  statusMode?: 'online' | 'offline' | 'hidden' | 'away';
 }
 
 interface Friend {
@@ -81,7 +83,7 @@ interface Friend {
   userID: string;
   displayName: string;
   photoURL: string;
-  status?: 'online' | 'offline';
+  status?: 'online' | 'offline' | 'hidden' | 'away';
   lastSeen?: any;
   tags?: string[];
   lastMessage?: string;
@@ -102,7 +104,7 @@ export default function ChatPage() {
   const [addingFriend, setAddingFriend] = useState(false);
   const [copiedUserID, setCopiedUserID] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
-  const [hideOnlineStatus, setHideOnlineStatus] = useState(false);
+  const [statusMode, setStatusMode] = useState<'online' | 'offline' | 'hidden' | 'away'>('online');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
@@ -118,7 +120,7 @@ export default function ChatPage() {
   useEffect(() => {
     if (user) {
       loadFriends();
-      setupUserPresence(user.uid);
+      setupUserPresence(user.uid, statusMode);
       addSystemLog('INFO', `Usuário ${user.displayName} conectado`, { userID: user.userID });
     }
   }, [user]);
@@ -143,6 +145,12 @@ export default function ChatPage() {
     }
   }, [friends, selectedFriend]);
 
+  // Atualizar status quando mudado
+  useEffect(() => {
+    if (user) {
+      updateUserStatus(user.uid, statusMode);
+    }
+  }, [statusMode, user]);
 
   const loadUserData = async (userId: string) => {
     try {
@@ -166,11 +174,11 @@ export default function ChatPage() {
           userID: userID,
           friends: userData.friends || [],
           tags: userData.tags || [],
-          hideOnlineStatus: userData.hideOnlineStatus || false
+          statusMode: userData.statusMode || 'online'
         });
         setNewDisplayName(userData.displayName);
         setNewPhotoURL(userData.photoURL);
-        setHideOnlineStatus(userData.hideOnlineStatus || false);
+        setStatusMode(userData.statusMode || 'online');
       } else {
         const currentUser = auth.currentUser;
         if (currentUser) {
@@ -184,7 +192,7 @@ export default function ChatPage() {
             userID: userID,
             friends: [],
             tags: [],
-            hideOnlineStatus: false
+            statusMode: 'online'
           };
           
           await setDoc(doc(db, 'users', userId), newUserData);
@@ -193,11 +201,11 @@ export default function ChatPage() {
             uid: userId,
             ...newUserData,
             tags: newUserData.tags || [],
-            hideOnlineStatus: newUserData.hideOnlineStatus || false
+            statusMode: newUserData.statusMode || 'online'
           });
           setNewDisplayName(newUserData.displayName);
           setNewPhotoURL(newUserData.photoURL);
-          setHideOnlineStatus(newUserData.hideOnlineStatus || false);
+          setStatusMode(newUserData.statusMode || 'online');
         }
       }
     } catch (error) {
@@ -232,11 +240,20 @@ export default function ChatPage() {
           onValue(statusRef, (snapshot) => {
             if (snapshot.exists()) {
               const status = snapshot.val();
-              setFriends(prev => prev.map(f => 
-                f.uid === friendUID 
-                  ? { ...f, status: status.state, lastSeen: status.last_changed }
-                  : f
-              ));
+              // Só mostrar status se não estiver oculto
+              if (status.state !== 'hidden') {
+                setFriends(prev => prev.map(f => 
+                  f.uid === friendUID 
+                    ? { ...f, status: status.state, lastSeen: status.last_changed }
+                    : f
+                ));
+              } else {
+                setFriends(prev => prev.map(f => 
+                  f.uid === friendUID 
+                    ? { ...f, status: 'offline', lastSeen: status.last_changed }
+                    : f
+                ));
+              }
             }
           });
           
@@ -412,14 +429,14 @@ export default function ChatPage() {
       await updateDoc(doc(db, 'users', user.uid), {
         displayName: newDisplayName,
         photoURL: newPhotoURL,
-        hideOnlineStatus: hideOnlineStatus
+        statusMode: statusMode
       });
       
       setUser({
         ...user,
         displayName: newDisplayName,
         photoURL: newPhotoURL,
-        hideOnlineStatus: hideOnlineStatus
+        statusMode: statusMode
       });
       setEditingProfile(false);
     } catch (error) {
@@ -450,7 +467,7 @@ export default function ChatPage() {
 
   if (loading) {
     return (
-      <div className="h-screen flex items-center justify-center bg-black">
+      <div className="min-h-screen flex items-center justify-center bg-black">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto mb-4"></div>
           <p className="text-gray-400">Carregando chat...</p>
@@ -460,10 +477,10 @@ export default function ChatPage() {
   }
 
   return (
-    <div className="h-screen [-webkit-app-region:no-drag] flex bg-black text-white">
+    <div className="min-h-screen [-webkit-app-region:no-drag] flex bg-black text-white overflow-hidden">
       {/* Mobile Friends Drawer */}
       <MobileFriendsDrawer friendsCount={friends.length}>
-        <div className="flex flex-col h-full">
+        <div className="flex flex-col h-full overflow-hidden">
           <div className="p-4 border-b border-gray-700">
             <div className="flex items-center gap-3 mb-3">
               <Avatar className="h-12 w-12 ring-2 ring-white">
@@ -566,11 +583,19 @@ export default function ChatPage() {
                             {friend.displayName?.charAt(0)}
                           </AvatarFallback>
                         </Avatar>
-                        <Circle 
-                          className={`absolute -bottom-1 -right-1 h-4 w-4 rounded-full border-2 border-gray-900 ${
-                            friend.status === 'online' ? 'fill-green-500 text-green-500' : 'fill-gray-500 text-gray-500'
-                          }`}
-                        />
+                        {friend.status && friend.status !== 'hidden' && (
+                          <div className={`absolute -bottom-1 -right-1 h-4 w-4 rounded-full border-2 border-gray-900 flex items-center justify-center ${
+                            friend.status === 'online' 
+                              ? 'bg-green-500' 
+                              : friend.status === 'away'
+                              ? 'bg-yellow-500'
+                              : 'bg-gray-500'
+                          }`}>
+                            {friend.status === 'away' && (
+                              <Clock className="h-2 w-2 text-white" />
+                            )}
+                          </div>
+                        )}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
@@ -600,7 +625,7 @@ export default function ChatPage() {
       </MobileFriendsDrawer>
 
       {/* Desktop Friends Sidebar */}
-      <div className="hidden sm:flex w-80 bg-gray-900 border-r border-gray-700 flex-col">
+      <div className="hidden sm:flex w-80 bg-gray-900 border-r border-gray-700 flex-col overflow-hidden">
         <div className="p-4 border-b border-gray-700">
           <div className="flex items-center gap-3 mb-3">
             <Avatar className="h-12 w-12 ring-2 ring-white">
@@ -685,22 +710,72 @@ export default function ChatPage() {
                 placeholder="Nome de exibição"
                 className="bg-gray-700 border-gray-600 text-white"
               />
-              <Input
-                value={newPhotoURL}
-                onChange={(e) => setNewPhotoURL(e.target.value)}
-                placeholder="URL da foto"
-                className="bg-gray-700 border-gray-600 text-white"
-              />
-              <div className="flex items-center space-x-2">
-                <Switch
-                  id="hide-status"
-                  checked={hideOnlineStatus}
-                  onCheckedChange={setHideOnlineStatus}
-                />
-                <Label htmlFor="hide-status" className="text-white text-sm">
-                  {hideOnlineStatus ? <EyeOff className="h-4 w-4 inline mr-1" /> : <Eye className="h-4 w-4 inline mr-1" />}
-                  Ocultar status online
+              <div className="space-y-2">
+                <Label htmlFor="status-mode" className="text-white text-sm">
+                  Status de presença:
                 </Label>
+                <Select value={statusMode} onValueChange={(value: 'online' | 'offline' | 'hidden' | 'away') => setStatusMode(value)}>
+                  <SelectTrigger className="bg-gray-700 border-gray-600 text-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-gray-800 border-gray-600">
+                    <SelectItem value="online" className="text-white hover:bg-gray-700">
+                      <div className="flex items-center gap-2">
+                        <Circle className="h-3 w-3 fill-green-500 text-green-500" />
+                        Online
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="away" className="text-white hover:bg-gray-700">
+                      <div className="flex items-center gap-2">
+                        <Clock className="h-3 w-3 text-yellow-500" />
+                        Ausente
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="hidden" className="text-white hover:bg-gray-700">
+                      <div className="flex items-center gap-2">
+                        <Eye className="h-3 w-3 text-gray-500" />
+                        Oculto
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="offline" className="text-white hover:bg-gray-700">
+                      <div className="flex items-center gap-2">
+                        <Circle className="h-3 w-3 fill-gray-500 text-gray-500" />
+                        Offline
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={statusMode} onValueChange={(value: 'online' | 'offline' | 'hidden' | 'away') => setStatusMode(value)}>
+                  <SelectTrigger className="bg-gray-700 border-gray-600 text-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-gray-800 border-gray-600">
+                    <SelectItem value="online" className="text-white hover:bg-gray-700">
+                      <div className="flex items-center gap-2">
+                        <Circle className="h-3 w-3 fill-green-500 text-green-500" />
+                        Online
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="away" className="text-white hover:bg-gray-700">
+                      <div className="flex items-center gap-2">
+                        <Clock className="h-3 w-3 text-yellow-500" />
+                        Ausente
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="hidden" className="text-white hover:bg-gray-700">
+                      <div className="flex items-center gap-2">
+                        <Eye className="h-3 w-3 text-gray-500" />
+                        Oculto
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="offline" className="text-white hover:bg-gray-700">
+                      <div className="flex items-center gap-2">
+                        <Circle className="h-3 w-3 fill-gray-500 text-gray-500" />
+                        Offline
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div className="flex gap-2">
                 <Button 
@@ -786,11 +861,19 @@ export default function ChatPage() {
                           {friend.displayName?.charAt(0)}
                         </AvatarFallback>
                       </Avatar>
-                      <Circle 
-                        className={`absolute -bottom-1 -right-1 h-4 w-4 rounded-full border-2 border-gray-900 ${
-                          friend.status === 'online' ? 'fill-green-500 text-green-500' : 'fill-gray-500 text-gray-500'
-                        }`}
-                      />
+                      {friend.status && friend.status !== 'hidden' && (
+                        <div className={`absolute -bottom-1 -right-1 h-4 w-4 rounded-full border-2 border-gray-900 flex items-center justify-center ${
+                          friend.status === 'online' 
+                            ? 'bg-green-500' 
+                            : friend.status === 'away'
+                            ? 'bg-yellow-500'
+                            : 'bg-gray-500'
+                        }`}>
+                          {friend.status === 'away' && (
+                            <Clock className="h-2 w-2 text-white" />
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
@@ -818,7 +901,7 @@ export default function ChatPage() {
         </div>
       </div>
 
-      <div className="flex-1 grid grid-rows-[auto_1fr_auto]">
+      <div className="flex-1 flex flex-col min-w-0">
         {selectedFriend ? (
           <>
             <div className="bg-gray-900 border-b border-gray-700 p-4">
@@ -831,12 +914,32 @@ export default function ChatPage() {
                 </Avatar>
                 <div>
                   <h2 className="text-white font-semibold">{selectedFriend.displayName}</h2>
-                  <p className="text-gray-400 text-sm">{selectedFriend.userID}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-gray-400 text-sm">{selectedFriend.userID}</p>
+                    {selectedFriend.status && selectedFriend.status !== 'hidden' && (
+                      <Badge 
+                        variant="secondary" 
+                        className={`text-xs ${
+                          selectedFriend.status === 'online' 
+                            ? 'bg-green-600 text-white' 
+                            : selectedFriend.status === 'away'
+                            ? 'bg-yellow-600 text-white'
+                            : 'bg-gray-600 text-white'
+                        }`}
+                      >
+                        {selectedFriend.status === 'online' && <Circle className="h-2 w-2 mr-1 fill-current" />}
+                        {selectedFriend.status === 'away' && <Clock className="h-2 w-2 mr-1" />}
+                        {selectedFriend.status === 'offline' && <Circle className="h-2 w-2 mr-1 fill-current" />}
+                        {selectedFriend.status === 'online' ? 'Online' : 
+                         selectedFriend.status === 'away' ? 'Ausente' : 'Offline'}
+                      </Badge>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div className="overflow-y-auto p-4 space-y-4 bg-gray-800 scrollbar-hide">
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-800 scrollbar-hide">
               {messages.map((message) => (
                 <div
                   key={message.id}
@@ -913,11 +1016,11 @@ export default function ChatPage() {
             </div>
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center bg-gray-800">
+          <div className="flex-1 flex items-center justify-center bg-gray-800 p-4">
             <div className="text-center">
               <MessageCircle className="h-16 w-16 text-gray-600 mx-auto mb-4" />
               <h2 className="text-xl font-semibold text-white mb-2">Selecione um amigo</h2>
-              <p className="text-gray-400">Escolha um amigo da lista para começar a conversar</p>
+              <p className="text-gray-400 text-center">Escolha um amigo da lista para começar a conversar</p>
             </div>
           </div>
         )}
