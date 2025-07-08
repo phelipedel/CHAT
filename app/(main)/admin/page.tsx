@@ -22,12 +22,17 @@ import { signOut } from 'firebase/auth';
 import { auth, db } from '@/lib/firebase';
 import { isAdminUID } from '@/lib/config';
 import { encryptMessage, decryptMessage } from '@/lib/encryption';
+import { addSystemLog } from '@/lib/firebase';
 import { generateUserID, isValidUserID } from '@/lib/utils';
+import { UserTags } from '@/components/ui/user-tags';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Separator } from '@/components/ui/separator';
 import { 
   Send, 
   LogOut, 
@@ -42,7 +47,12 @@ import {
   MessageCircle,
   Trash2,
   Copy,
-  Check
+  Check,
+  Database,
+  AlertTriangle,
+  FileText,
+  UserCog,
+  Trash
 } from 'lucide-react';
 
 interface Message {
@@ -64,6 +74,7 @@ interface User {
   isAdmin: boolean;
   userID: string;
   friends: string[];
+  tags?: string[];
 }
 
 interface Friend {
@@ -73,6 +84,27 @@ interface Friend {
   photoURL: string;
   lastMessage?: string;
   lastMessageTime?: any;
+  tags?: string[];
+}
+
+interface SystemLog {
+  id: string;
+  level: 'INFO' | 'ERROR' | 'WARNING';
+  message: string;
+  details?: any;
+  timestamp: any;
+  createdAt: any;
+}
+
+interface AppUser {
+  uid: string;
+  email: string;
+  displayName: string;
+  photoURL: string;
+  userID: string;
+  tags: string[];
+  isAdmin: boolean;
+  friends: string[];
 }
 
 export default function ChatPage() {
@@ -89,8 +121,16 @@ export default function ChatPage() {
   const [addingFriend, setAddingFriend] = useState(false);
   const [copiedUserID, setCopiedUserID] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
+  const [logs, setLogs] = useState<SystemLog[]>([]);
+  const [allUsers, setAllUsers] = useState<AppUser[]>([]);
+  const [selectedUser, setSelectedUser] = useState<AppUser | null>(null);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [clearingDatabase, setClearingDatabase] = useState(false);
+  const [activeTab, setActiveTab] = useState<'chat' | 'logs' | 'users'>('chat');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
+
+  const availableTags = ['ADM', 'Suporte', 'Verificado', 'Beta'];
 
   useEffect(() => {
     const currentUser = auth.currentUser;
@@ -104,6 +144,8 @@ export default function ChatPage() {
   useEffect(() => {
     if (user) {
       loadFriends();
+      loadSystemLogs();
+      loadAllUsers();
     }
   }, [user]);
 
@@ -152,7 +194,8 @@ export default function ChatPage() {
           photoURL: userData.photoURL,
           isAdmin: isUserAdmin,
           userID: userID,
-          friends: userData.friends || []
+          friends: userData.friends || [],
+          tags: userData.tags || []
         });
         setNewDisplayName(userData.displayName);
         setNewPhotoURL(userData.photoURL);
@@ -167,14 +210,16 @@ export default function ChatPage() {
             isAdmin: isUserAdmin,
             createdAt: new Date(),
             userID: userID,
-            friends: []
+            friends: [],
+            tags: []
           };
           
           await setDoc(doc(db, 'users', userId), newUserData);
           
           setUser({
             uid: userId,
-            ...newUserData
+            ...newUserData,
+            tags: newUserData.tags || []
           });
           setNewDisplayName(newUserData.displayName);
           setNewPhotoURL(newUserData.photoURL);
@@ -203,6 +248,7 @@ export default function ChatPage() {
             userID: friendData.userID,
             displayName: friendData.displayName,
             photoURL: friendData.photoURL,
+            tags: friendData.tags || []
           });
         }
       }
@@ -244,6 +290,119 @@ export default function ChatPage() {
     });
 
     return unsubscribe;
+  };
+
+  const loadSystemLogs = () => {
+    const q = query(
+      collection(db, 'logs'),
+      orderBy('timestamp', 'desc')
+    );
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const loadedLogs: SystemLog[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        loadedLogs.push({
+          id: doc.id,
+          level: data.level,
+          message: data.message,
+          details: data.details,
+          timestamp: data.timestamp,
+          createdAt: data.createdAt
+        });
+      });
+      setLogs(loadedLogs);
+    });
+
+    return unsubscribe;
+  };
+
+  const loadAllUsers = async () => {
+    try {
+      const q = query(collection(db, 'users'));
+      const querySnapshot = await getDocs(q);
+      const users: AppUser[] = [];
+      
+      querySnapshot.forEach((doc) => {
+        const userData = doc.data();
+        users.push({
+          uid: doc.id,
+          email: userData.email,
+          displayName: userData.displayName,
+          photoURL: userData.photoURL,
+          userID: userData.userID,
+          tags: userData.tags || [],
+          isAdmin: isAdminUID(doc.id),
+          friends: userData.friends || []
+        });
+      });
+      
+      setAllUsers(users);
+    } catch (error) {
+      console.error('Erro ao carregar usuários:', error);
+    }
+  };
+
+  const clearChatHistory = async () => {
+    if (!confirm('ATENÇÃO: Esta ação irá apagar TODAS as mensagens do chat. Esta ação não pode ser desfeita. Tem certeza?')) {
+      return;
+    }
+
+    setClearingDatabase(true);
+    try {
+      const messagesQuery = query(collection(db, 'messages'));
+      const messagesSnapshot = await getDocs(messagesQuery);
+      
+      const deletePromises = messagesSnapshot.docs.map(doc => 
+        doc.ref.delete()
+      );
+      
+      await Promise.all(deletePromises);
+      
+      await addSystemLog('WARNING', 'Histórico de conversas limpo pelo administrador', { 
+        adminUID: user?.uid,
+        adminName: user?.displayName,
+        messagesDeleted: messagesSnapshot.size
+      });
+      
+      alert(`${messagesSnapshot.size} mensagens foram deletadas com sucesso.`);
+    } catch (error) {
+      console.error('Erro ao limpar banco de dados:', error);
+      alert('Erro ao limpar banco de dados. Tente novamente.');
+    }
+    setClearingDatabase(false);
+  };
+
+  const updateUserTags = async () => {
+    if (!selectedUser) return;
+
+    try {
+      await updateDoc(doc(db, 'users', selectedUser.uid), {
+        tags: selectedTags
+      });
+      
+      await addSystemLog('INFO', 'Tags de usuário atualizadas', {
+        targetUser: selectedUser.displayName,
+        targetUID: selectedUser.uid,
+        newTags: selectedTags,
+        adminUID: user?.uid,
+        adminName: user?.displayName
+      });
+      
+      // Atualizar lista local
+      setAllUsers(prev => prev.map(u => 
+        u.uid === selectedUser.uid 
+          ? { ...u, tags: selectedTags }
+          : u
+      ));
+      
+      setSelectedUser(null);
+      setSelectedTags([]);
+      alert('Tags atualizadas com sucesso!');
+    } catch (error) {
+      console.error('Erro ao atualizar tags:', error);
+      alert('Erro ao atualizar tags. Tente novamente.');
+    }
   };
 
   const scrollToBottom = () => {
@@ -424,7 +583,7 @@ export default function ChatPage() {
 
   return (
     <div className="min-h-screen [-webkit-app-region:no-drag] flex bg-black text-white">
-      <div className="w-80 bg-gray-900 border-r border-gray-700 flex flex-col">
+      <div className="w-80 bg-gray-900 border-r border-gray-700 flex flex-col overflow-hidden">
         <div className="p-4 border-b border-gray-700">
           <div className="flex items-center gap-3 mb-3">
             <Avatar className="h-12 w-12 ring-2 ring-white">
@@ -434,7 +593,10 @@ export default function ChatPage() {
               </AvatarFallback>
             </Avatar>
             <div className="flex-1">
-              <h2 className="text-white font-semibold">{user?.displayName}</h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-white font-semibold">{user?.displayName}</h2>
+                {user?.tags && <UserTags tags={user.tags} size="sm" />}
+              </div>
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1">
                   <Badge variant="secondary" className="text-xs bg-green-600 text-white">
@@ -537,6 +699,41 @@ export default function ChatPage() {
           </div>
         )}
 
+        {/* Admin Navigation */}
+        <div className="p-4 border-b border-gray-700">
+          <div className="flex gap-1">
+            <Button
+              variant={activeTab === 'chat' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setActiveTab('chat')}
+              className="flex-1 text-xs"
+            >
+              <MessageCircle className="h-3 w-3 mr-1" />
+              Chat
+            </Button>
+            <Button
+              variant={activeTab === 'logs' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setActiveTab('logs')}
+              className="flex-1 text-xs"
+            >
+              <FileText className="h-3 w-3 mr-1" />
+              Logs
+            </Button>
+            <Button
+              variant={activeTab === 'users' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setActiveTab('users')}
+              className="flex-1 text-xs"
+            >
+              <UserCog className="h-3 w-3 mr-1" />
+              Usuários
+            </Button>
+          </div>
+        </div>
+
+        {activeTab === 'chat' && (
+          <>
         <div className="p-4 border-b border-gray-700">
           <div className="mb-2">
             <p className="text-xs text-gray-400 mb-1">Adicionar amigo pelo ID:</p>
@@ -596,7 +793,10 @@ export default function ChatPage() {
                       </AvatarFallback>
                     </Avatar>
                     <div className="flex-1 min-w-0">
-                      <h4 className="text-white font-medium truncate">{friend.displayName}</h4>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-white font-medium truncate">{friend.displayName}</h4>
+                        {friend.tags && <UserTags tags={friend.tags} size="sm" />}
+                      </div>
                       <p className="text-gray-400 text-xs">{friend.userID}</p>
                     </div>
                     <Button
@@ -616,7 +816,212 @@ export default function ChatPage() {
             )}
           </div>
         </div>
+          </>
+        )}
+
+        {activeTab === 'logs' && (
+          <div className="flex-1 overflow-y-auto scrollbar-hide">
+            <div className="p-4">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-white font-medium">Logs do Sistema</h3>
+                <Badge variant="secondary" className="text-xs">
+                  {logs.length} registros
+                </Badge>
+              </div>
+              
+              <div className="space-y-2">
+                {logs.map((log) => (
+                  <div
+                    key={log.id}
+                    className={`p-3 rounded-lg border-l-4 ${
+                      log.level === 'ERROR' 
+                        ? 'bg-red-900/20 border-red-500' 
+                        : log.level === 'WARNING'
+                        ? 'bg-yellow-900/20 border-yellow-500'
+                        : 'bg-blue-900/20 border-blue-500'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <Badge 
+                        variant={log.level === 'ERROR' ? 'destructive' : 'secondary'}
+                        className="text-xs"
+                      >
+                        {log.level}
+                      </Badge>
+                      <span className="text-xs text-gray-400">
+                        {log.timestamp?.toDate?.().toLocaleString() || 'Agora'}
+                      </span>
+                    </div>
+                    <p className="text-sm text-white">{log.message}</p>
+                    {log.details && (
+                      <pre className="text-xs text-gray-400 mt-2 overflow-x-auto">
+                        {JSON.stringify(log.details, null, 2)}
+                      </pre>
+                    )}
+                  </div>
+                ))}
+                
+                {logs.length === 0 && (
+                  <div className="text-center py-8">
+                    <FileText className="h-8 w-8 text-gray-600 mx-auto mb-2" />
+                    <p className="text-gray-500 text-sm">Nenhum log encontrado</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'users' && (
+          <div className="flex-1 overflow-y-auto scrollbar-hide">
+            <div className="p-4">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-white font-medium">Gerenciar Usuários</h3>
+                <Badge variant="secondary" className="text-xs">
+                  {allUsers.length} usuários
+                </Badge>
+              </div>
+              
+              {/* Database Management */}
+              <Card className="bg-gray-800 border-gray-700 mb-4">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-white text-sm flex items-center gap-2">
+                    <Database className="h-4 w-4" />
+                    Gerenciamento do Banco
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <Button
+                    onClick={clearChatHistory}
+                    disabled={clearingDatabase}
+                    variant="destructive"
+                    size="sm"
+                    className="w-full"
+                  >
+                    {clearingDatabase ? (
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    ) : (
+                      <Trash className="h-4 w-4 mr-2" />
+                    )}
+                    {clearingDatabase ? 'Limpando...' : 'Limpar Histórico de Conversas'}
+                  </Button>
+                  <p className="text-xs text-gray-400 mt-2">
+                    <AlertTriangle className="h-3 w-3 inline mr-1" />
+                    Esta ação não pode ser desfeita
+                  </p>
+                </CardContent>
+              </Card>
+              
+              {/* User Management */}
+              <div className="space-y-2">
+                {allUsers.map((appUser) => (
+                  <div
+                    key={appUser.uid}
+                    className="flex items-center gap-3 p-3 rounded-lg bg-gray-800 hover:bg-gray-700 transition-colors"
+                  >
+                    <Avatar className="h-8 w-8">
+                      <AvatarImage src={appUser.photoURL} />
+                      <AvatarFallback className="bg-gray-700 text-white text-xs">
+                        {appUser.displayName?.charAt(0)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-white font-medium truncate text-sm">{appUser.displayName}</h4>
+                        {appUser.tags && <UserTags tags={appUser.tags} size="sm" />}
+                      </div>
+                      <p className="text-gray-400 text-xs">{appUser.userID}</p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setSelectedUser(appUser);
+                        setSelectedTags([...appUser.tags]);
+                      }}
+                      className="text-gray-400 hover:text-white hover:bg-gray-600"
+                    >
+                      <UserCog className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* User Tags Management Modal */}
+      {selectedUser && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-gray-900 border border-gray-700 rounded-lg p-6 max-w-md w-full mx-4">
+            <div className="flex items-center gap-3 mb-4">
+              <Avatar className="h-10 w-10">
+                <AvatarImage src={selectedUser.photoURL} />
+                <AvatarFallback className="bg-gray-700 text-white">
+                  {selectedUser.displayName?.charAt(0)}
+                </AvatarFallback>
+              </Avatar>
+              <div>
+                <h3 className="text-white font-medium">{selectedUser.displayName}</h3>
+                <p className="text-gray-400 text-sm">{selectedUser.userID}</p>
+              </div>
+            </div>
+            
+            <Separator className="my-4 bg-gray-700" />
+            
+            <div className="space-y-4">
+              <div>
+                <Label className="text-white text-sm font-medium">Tags do Usuário</Label>
+                <div className="mt-2 space-y-2">
+                  {availableTags.map((tag) => (
+                    <div key={tag} className="flex items-center space-x-2">
+                      <Checkbox
+                        id={tag}
+                        checked={selectedTags.includes(tag)}
+                        onCheckedChange={(checked) => {
+                          if (checked) {
+                            setSelectedTags(prev => [...prev, tag]);
+                          } else {
+                            setSelectedTags(prev => prev.filter(t => t !== tag));
+                          }
+                        }}
+                        disabled={tag === 'ADM' && !user?.isAdmin}
+                      />
+                      <Label htmlFor={tag} className="text-white text-sm flex items-center gap-2">
+                        <UserTags tags={[tag]} size="sm" />
+                        {tag}
+                        {tag === 'ADM' && !user?.isAdmin && (
+                          <span className="text-xs text-gray-500">(Apenas admins)</span>
+                        )}
+                      </Label>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              
+              <div className="flex gap-2">
+                <Button
+                  onClick={updateUserTags}
+                  className="flex-1 bg-white text-black hover:bg-gray-200"
+                >
+                  Salvar Tags
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setSelectedUser(null);
+                    setSelectedTags([]);
+                  }}
+                  className="flex-1 border-gray-600 text-white hover:bg-gray-800"
+                >
+                  Cancelar
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 flex flex-col">
         {selectedFriend ? (
