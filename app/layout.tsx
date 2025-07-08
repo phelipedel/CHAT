@@ -1,8 +1,5 @@
 import './globals.css';
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
-
-const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
   title: 'Bate Papo Privado',
@@ -47,7 +44,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className={`${inter.className} bg-slate-950 text-white min-h-screen [-webkit-app-region:drag] overflow-hidden`}>
+      <body className="bg-slate-950 text-white min-h-screen [-webkit-app-region:drag] overflow-hidden">
         <div className="min-h-screen bg-gradient-to-br from-slate-950 via-purple-950 to-slate-950">
           {children}
         </div>
