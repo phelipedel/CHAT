@@ -15,6 +15,13 @@ service cloud.firestore {
                        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
     }
     
+    // Regras para logs do sistema
+    match /logs/{logId} {
+      allow write: if request.auth != null;
+      allow read: if request.auth != null && 
+                     get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+    }
+    
     // Regras para salas de chat
     match /rooms/{roomId} {
       allow read, write: if request.auth != null;
