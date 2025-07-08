@@ -58,8 +58,7 @@ export const addSystemLog = async (level: 'INFO' | 'ERROR' | 'WARNING', message:
       level,
       message,
       details: details || null,
-      timestamp: serverTimestamp(),
-      createdAt: new Date()
+      timestamp: serverTimestamp()
     });
   } catch (error) {
     console.error('Erro ao adicionar log:', error);
