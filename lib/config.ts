@@ -8,9 +8,11 @@ export const APP_CONFIG = {
     apiKey: "AIzaSyDFp23a4SlbUAG0eDQlKh9vooEr2HUFv7o",
     authDomain: "chatprivado-aa942.firebaseapp.com",
     projectId: "chatprivado-aa942",
-    storageBucket: "chatprivado-aa942.firebasestorage.app",
+    storageBucket: "chatprivado-aa942.appspot.com",
     messagingSenderId: "887373919024",
-    appId: "1:887373919024:web:8419695fbeaf3957eccef5"
+    appId: "1:887373919024:web:8419695fbeaf3957eccef5",
+    // Adicione a URL do seu Realtime Database aqui
+    databaseURL: "https://chatprivado-aa942-default-rtdb.firebaseio.com"
   },
   
   // Outras configurações

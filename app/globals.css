@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -78,5 +80,40 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: 'Inter', sans-serif;
   }
+}
+
+/* Utilitário para ocultar scrollbar */
+.scrollbar-hide {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;  /* Chrome, Safari and Opera */
+}
+
+/* Melhorias de responsividade */
+@media (max-width: 640px) {
+  .min-h-screen {
+    min-height: 100vh;
+    min-height: 100dvh; /* Para dispositivos móveis modernos */
+  }
+  
+  /* Garantir que o chat ocupe toda a altura disponível */
+  .mobile-chat-container {
+    height: 100vh;
+    height: 100dvh;
+  }
+}
+
+/* Melhorar performance de scroll em dispositivos móveis */
+.scrollbar-hide {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Garantir que elementos flexíveis não quebrem em telas pequenas */
+.flex-1 {
+  min-width: 0;
 }

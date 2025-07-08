@@ -21,12 +21,13 @@ export default function MainLayout({
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
         setAuthenticated(true);
-        // Verificar se o usuário é admin baseado no UID
         const adminStatus = isAdminUID(user.uid);
         setIsAdmin(adminStatus);
         
-        console.log('Usuário logado:', user.uid);
-        console.log('É admin:', adminStatus);
+        // Redirecionar administradores para a página de admin
+        if (adminStatus) {
+          router.push('/admin');
+        }
       } else {
         router.push('/login');
       }

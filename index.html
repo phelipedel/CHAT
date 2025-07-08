@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Super Admin - Painel de Controle</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        .tab-button { transition: background-color 0.2s, color 0.2s; }
+        .tab-button.active { background-color: #4338CA; color: white; }
+        .modal-backdrop { background-color: rgba(0, 0, 0, 0.7); }
+        .loader {
+            border: 4px solid #4A5568;
+            border-top: 4px solid #6366F1;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white font-sans">
+
+    <!-- Tela de Login -->
+    <div id="login-view" class="flex h-screen items-center justify-center p-4">
+        <div class="w-full max-w-sm p-8 bg-gray-800 rounded-lg shadow-2xl border border-gray-700">
+            <h1 class="text-3xl font-bold text-center mb-4 text-white">Acesso Super Admin</h1>
+            <p class="text-center text-gray-400 mb-6">Este painel concede acesso total ao sistema.</p>
+            <form id="login-form">
+                <div class="mb-4">
+                    <label for="email" class="block text-gray-300 mb-2">Email de Administrador</label>
+                    <input type="email" id="email" class="w-full p-3 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500" required>
+                </div>
+                <div class="mb-6">
+                    <label for="password" class="block text-gray-300 mb-2">Senha</label>
+                    <input type="password" id="password" class="w-full p-3 bg-gray-700 rounded border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500" required>
+                </div>
+                <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg transition-colors">Acessar Painel</button>
+                <p id="login-error" class="text-red-400 text-center mt-4"></p>
+            </form>
+        </div>
+    </div>
+
+    <!-- Painel de Administração -->
+    <div id="admin-dashboard" class="hidden">
+        <div class="min-h-screen bg-gray-900 text-white p-4 sm:p-6 md:p-8">
+            <div class="max-w-7xl mx-auto">
+                <header class="mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center">
+                    <div>
+                        <h1 class="text-4xl font-bold tracking-tight">Super Admin Dashboard</h1>
+                        <p id="welcome-message" class="text-gray-400 mt-1"></p>
+                    </div>
+                    <div class="flex items-center gap-2 mt-4 sm:mt-0">
+                        <button id="logout-button" class="flex items-center gap-2 px-4 py-2 bg-gray-700 hover:bg-red-700 rounded-lg transition-colors">
+                            Sair
+                        </button>
+                    </div>
+                </header>
+
+                <div id="tabs-container" class="mb-6 flex space-x-1 rounded-lg bg-gray-800 p-1 flex-wrap">
+                    <button data-tab="dashboard" class="tab-button flex-1 flex justify-center items-center gap-2 px-4 py-2 rounded-md">Dashboard</button>
+                    <button data-tab="users" class="tab-button flex-1 flex justify-center items-center gap-2 px-4 py-2 rounded-md">Usuários</button>
+                    <button data-tab="announcements" class="tab-button flex-1 flex justify-center items-center gap-2 px-4 py-2 rounded-md">Anúncios</button>
+                    <button data-tab="database" class="tab-button flex-1 flex justify-center items-center gap-2 px-4 py-2 rounded-md">Banco de Dados</button>
+                </div>
+
+                <div id="tab-content-dashboard" class="tab-content"></div>
+                <div id="tab-content-users" class="tab-content hidden"></div>
+                <div id="tab-content-announcements" class="tab-content hidden"></div>
+                <div id="tab-content-database" class="tab-content hidden"></div>
+            </div>
+        </div>
+
+        <div id="modal" class="hidden fixed inset-0 modal-backdrop flex items-center justify-center z-50 p-4">
+            <div id="modal-content" class="w-full max-w-lg bg-gray-800 border border-gray-700 rounded-lg shadow-2xl"></div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+        import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+        import { getFirestore, collection, query, onSnapshot, doc, updateDoc, deleteDoc, getDocs, writeBatch, getCountFromServer, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDFp23a4SlbUAG0eDQlKh9vooEr2HUFv7o",
+            authDomain: "chatprivado-aa942.firebaseapp.com",
+            projectId: "chatprivado-aa942",
+            storageBucket: "chatprivado-aa942.appspot.com",
+            messagingSenderId: "887373919024",
+            appId: "1:887373919024:web:8419695fbeaf3957eccef5",
+            databaseURL: "https://chatprivado-aa942-default-rtdb.firebaseio.com"
+        };
+        const ADMIN_UID = 'bBkztsKYlYY2BNK7UyyZ6gwNhxC2';
+        const availableTags = ['Suporte', 'Verificado', 'Beta'];
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        const loginView = document.getElementById('login-view');
+        const adminDashboard = document.getElementById('admin-dashboard');
+        const loginForm = document.getElementById('login-form');
+        const loginError = document.getElementById('login-error');
+        const logoutButton = document.getElementById('logout-button');
+        const welcomeMessage = document.getElementById('welcome-message');
+        const tabsContainer = document.getElementById('tabs-container');
+        const tabContents = {
+            dashboard: document.getElementById('tab-content-dashboard'),
+            users: document.getElementById('tab-content-users'),
+            announcements: document.getElementById('tab-content-announcements'),
+            database: document.getElementById('tab-content-database'),
+        };
+        const modal = document.getElementById('modal');
+        const modalContent = document.getElementById('modal-content');
+
+        let allUsersCache = [];
+        let logsCache = [];
+
+        onAuthStateChanged(auth, (user) => {
+            if (user && user.uid === ADMIN_UID) {
+                loginView.classList.add('hidden');
+                adminDashboard.classList.remove('hidden');
+                welcomeMessage.textContent = `Bem-vindo, ${user.displayName || 'Admin'}.`;
+                initializeDashboard();
+            } else {
+                loginView.classList.remove('hidden');
+                adminDashboard.classList.add('hidden');
+                if (user) signOut(auth);
+            }
+        });
+
+        loginForm.addEventListener('submit', async (e) => { e.preventDefault(); loginError.textContent = ''; await signInWithEmailAndPassword(auth, email.value, password.value).catch(() => loginError.textContent = 'Acesso negado.'); });
+        logoutButton.addEventListener('click', () => signOut(auth));
+
+        function initializeDashboard() {
+            renderDashboard();
+            renderUsersTab();
+            renderAnnouncementsTab();
+            renderDatabaseTab();
+            
+            tabsContainer.addEventListener('click', (e) => {
+                const button = e.target.closest('.tab-button');
+                if (!button) return;
+                
+                document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+                button.classList.add('active');
+
+                Object.values(tabContents).forEach(content => content.classList.add('hidden'));
+                tabContents[button.dataset.tab].classList.remove('hidden');
+            });
+            document.querySelector('.tab-button[data-tab="dashboard"]').classList.add('active');
+        }
+
+        async function renderDashboard() {
+            const usersCount = (await getCountFromServer(collection(db, "users"))).data().count;
+            const messagesCount = (await getCountFromServer(collection(db, "messages"))).data().count;
+            tabContents.dashboard.innerHTML = `
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="bg-gray-800 p-6 rounded-lg border border-gray-700"><h3 class="text-gray-400 text-sm font-medium">Usuários Totais</h3><p class="text-3xl font-bold mt-2">${usersCount}</p></div>
+                    <div class="bg-gray-800 p-6 rounded-lg border border-gray-700"><h3 class="text-gray-400 text-sm font-medium">Mensagens Trocadas</h3><p class="text-3xl font-bold mt-2">${messagesCount}</p></div>
+                </div>`;
+        }
+
+        function renderUsersTab() {
+            onSnapshot(query(collection(db, "users")), (snapshot) => {
+                allUsersCache = snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() }));
+                tabContents.users.innerHTML = `<div class="bg-gray-800 border border-gray-700 rounded-lg"><div class="p-6 border-b border-gray-700"><h3 class="text-lg font-semibold">Todos os Usuários (${allUsersCache.length})</h3></div><div class="p-4 space-y-2">${allUsersCache.map(renderUserRow).join('')}</div></div>`;
+            });
+        }
+        
+        function renderUserRow(user) {
+            const creationDate = user.createdAt?.seconds ? new Date(user.createdAt.seconds * 1000).toLocaleDateString() : 'N/A';
+            const statusClass = user.status === 'banned' ? 'bg-red-500' : 'bg-green-500';
+            const statusText = user.status === 'banned' ? 'Banido' : 'Ativo';
+            return `
+                <div class="flex items-center gap-4 p-3 rounded-lg hover:bg-gray-700/50">
+                    <img src="${user.photoURL || 'https://placehold.co/40x40/1f2937/ffffff?text=?'}" alt="Avatar" class="h-10 w-10 rounded-full object-cover">
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <p class="font-medium truncate">${user.displayName}</p>
+                            <span class="text-xs px-2 py-0.5 rounded-full text-white ${statusClass}">${statusText}</span>
+                            ${user.isAdmin ? `<span class="text-xs bg-yellow-500 text-black px-2 py-0.5 rounded-full font-bold">Admin</span>` : ''}
+                        </div>
+                        <p class="text-sm text-gray-400 truncate">${user.email}</p>
+                        <p class="text-xs text-gray-500">Criado em: ${creationDate}</p>
+                    </div>
+                    <div class="flex gap-2">
+                        <button data-action="analyze-user" data-uid="${user.uid}" class="p-2 bg-purple-600 hover:bg-purple-700 rounded-lg" title="Analisar Perfil com IA">✨</button>
+                        <button data-action="edit" data-uid="${user.uid}" class="p-2 bg-gray-600 hover:bg-gray-500 rounded-lg">Editar</button>
+                        <button data-action="delete" data-uid="${user.uid}" data-name="${user.displayName}" class="p-2 bg-red-800 hover:bg-red-700 rounded-lg">Deletar</button>
+                    </div>
+                </div>`;
+        }
+        
+        function renderAnnouncementsTab() {
+            tabContents.announcements.innerHTML = `
+                <div class="bg-gray-800 border border-gray-700 rounded-lg p-6">
+                    <h3 class="text-lg font-semibold mb-2">Enviar Anúncio Global</h3>
+                    <p class="text-sm text-gray-400 mb-4">A mensagem será exibida para todos os usuários que abrirem o chat.</p>
+                    <textarea id="announcement-text" class="w-full p-3 bg-gray-700 rounded border border-gray-600 h-28" placeholder="Digite sua mensagem aqui..."></textarea>
+                    <div class="flex gap-2 mt-4">
+                        <button id="send-announcement-btn" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg">Enviar Anúncio</button>
+                        <button id="generate-announcement-btn" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg flex items-center gap-2">Gerar com IA ✨</button>
+                    </div>
+                </div>`;
+        }
+
+        function renderDatabaseTab() {
+            tabContents.database.innerHTML = `
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="bg-gray-800 border border-green-500/30 rounded-lg p-6">
+                        <h3 class="font-semibold mb-2 text-green-400">Backup do Banco (JSON)</h3>
+                        <p class="text-sm text-gray-400 mb-4">Baixe um arquivo JSON com os dados de usuários, mensagens e logs.</p>
+                        <button id="download-backup-btn" class="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg flex items-center justify-center gap-2">Baixar Backup</button>
+                    </div>
+                    <div class="bg-gray-800 border border-blue-500/30 rounded-lg p-6">
+                        <h3 class="font-semibold mb-2 text-blue-400">Restaurar Backup (JSON)</h3>
+                        <p class="text-sm text-gray-400 mb-4">Faça upload de um arquivo de backup JSON. ATENÇÃO: Isso pode sobrescrever dados existentes.</p>
+                        <input type="file" id="restore-file-input" class="hidden" accept=".json">
+                        <button id="restore-backup-btn" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg">Carregar Arquivo</button>
+                    </div>
+                </div>`;
+            document.getElementById('restore-file-input').addEventListener('change', handleRestoreFile);
+        }
+
+        function openModal(type, data) {
+            let content = '';
+            if (type === 'editUser') {
+                const user = data;
+                content = `
+                    <div class="p-6"><h2 class="text-xl font-bold mb-6">Editar: ${user.displayName}</h2><div class="space-y-4">
+                        <div><label class="block text-sm">Nome</label><input id="edit-displayName" value="${user.displayName}" class="mt-1 w-full p-2 bg-gray-700 rounded"></div>
+                        <div><label class="block text-sm">Email</label><input id="edit-email" value="${user.email}" class="mt-1 w-full p-2 bg-gray-700 rounded"></div>
+                        <div><label class="block text-sm">Foto URL</label><input id="edit-photoURL" value="${user.photoURL}" class="mt-1 w-full p-2 bg-gray-700 rounded"></div>
+                        <div><label class="block text-sm mb-2">Status</label><select id="edit-status" class="w-full p-2 bg-gray-700 rounded"><option value="active" ${user.status !== 'banned' ? 'selected' : ''}>Ativo</option><option value="banned" ${user.status === 'banned' ? 'selected' : ''}>Banido</option></select></div>
+                        <div><label class="block text-sm mb-2">Permissões</label><div class="flex items-center"><input type="checkbox" id="edit-isAdmin" class="h-4 w-4" ${user.isAdmin ? 'checked' : ''}><label for="edit-isAdmin" class="ml-2 font-bold text-yellow-400">Administrador</label></div></div>
+                    </div></div>
+                    <div class="flex justify-end gap-2 p-4 bg-gray-900/50 border-t border-gray-700"><button id="modal-cancel-button" class="px-4 py-2 bg-gray-600 rounded">Cancelar</button><button id="modal-save-button" data-uid="${user.uid}" class="px-4 py-2 bg-indigo-600 rounded">Salvar</button></div>`;
+            } else if (type === 'aiAnnouncement') {
+                content = `<div class="p-6"><h2 class="text-xl font-bold mb-4">Gerador de Anúncios com IA ✨</h2><p class="text-gray-400 mb-4">Digite um tópico e a IA criará uma mensagem de anúncio para você.</p><input id="ai-announcement-topic" class="w-full p-2 bg-gray-700 rounded" placeholder="Ex: manutenção do sistema amanhã"><div id="ai-announcement-result" class="mt-4 p-3 bg-gray-900 rounded min-h-[100px]"></div></div><div class="flex justify-end gap-2 p-4 bg-gray-900/50 border-t border-gray-700"><button id="modal-cancel-button" class="px-4 py-2 bg-gray-600 rounded">Fechar</button><button id="ai-generate-btn" class="px-4 py-2 bg-purple-600 rounded">Gerar Anúncio</button></div>`;
+            }
+            modalContent.innerHTML = content;
+            modal.classList.remove('hidden');
+        }
+
+        async function callGemini(prompt) {
+            const apiKey = ""; 
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+            const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const result = await response.json();
+                return result.candidates[0].content.parts[0].text;
+            } catch (error) {
+                console.error("Erro na API Gemini:", error);
+                return "Desculpe, não foi possível gerar uma resposta da IA.";
+            }
+        }
+
+        function handleRestoreFile(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = async (event) => {
+                if (!confirm("Restaurar este backup? Ação IRREVERSÍVEL!")) return;
+                try {
+                    const backupData = JSON.parse(event.target.result);
+                    for (const collectionName in backupData) {
+                        const batch = writeBatch(db);
+                        backupData[collectionName].forEach(item => {
+                            const { id, ...data } = item;
+                            batch.set(doc(db, collectionName, id), data);
+                        });
+                        await batch.commit();
+                    }
+                    alert("Backup restaurado com sucesso!");
+                } catch (err) { alert("Erro ao restaurar o arquivo."); }
+            };
+            reader.readAsText(file);
+        }
+
+        document.addEventListener('click', async (e) => {
+            const target = e.target.closest('button');
+            if (!target) return;
+
+            const action = target.dataset.action;
+            const uid = target.dataset.uid;
+
+            if (target.id === 'modal-cancel-button') modal.classList.add('hidden');
+            if (target.id === 'modal-save-button') {
+                const updatedData = {
+                    displayName: document.getElementById('edit-displayName').value,
+                    email: document.getElementById('edit-email').value,
+                    photoURL: document.getElementById('edit-photoURL').value,
+                    isAdmin: document.getElementById('edit-isAdmin').checked,
+                    status: document.getElementById('edit-status').value,
+                };
+                await updateDoc(doc(db, "users", uid), updatedData);
+                alert("Usuário atualizado!");
+                modal.classList.add('hidden');
+            }
+
+            if (action === 'edit') {
+                const user = allUsersCache.find(u => u.uid === uid);
+                if (user) openModal('editUser', user);
+            }
+            if (action === 'delete') {
+                if (confirm(`Deletar o usuário ${target.dataset.name}?`)) {
+                    await deleteDoc(doc(db, "users", uid));
+                    alert('Usuário deletado.');
+                }
+            }
+            if (action === 'analyze-user') {
+                const user = allUsersCache.find(u => u.uid === uid);
+                if (user) {
+                    const prompt = `Faça um resumo de perfil para um administrador sobre o seguinte usuário: Nome: ${user.displayName}, Email: ${user.email}, Status: ${user.status || 'ativo'}, Admin: ${user.isAdmin ? 'Sim' : 'Não'}, Amigos: ${user.friends?.length || 0}. Seja breve e informativo.`;
+                    const summary = await callGemini(prompt);
+                    alert(`Análise do Perfil:\n\n${summary}`);
+                }
+            }
+
+            if (target.id === 'send-announcement-btn') {
+                const text = document.getElementById('announcement-text').value;
+                if (!text.trim()) return alert("A mensagem não pode estar vazia.");
+                target.disabled = true;
+                await addDoc(collection(db, "announcements"), { text, createdAt: serverTimestamp() });
+                target.disabled = false;
+                document.getElementById('announcement-text').value = '';
+                alert("Anúncio enviado!");
+            }
+            if (target.id === 'generate-announcement-btn') {
+                openModal('aiAnnouncement');
+            }
+            if (target.id === 'ai-generate-btn') {
+                const topic = document.getElementById('ai-announcement-topic').value;
+                if (!topic.trim()) return alert("Por favor, insira um tópico.");
+                const resultDiv = document.getElementById('ai-announcement-result');
+                resultDiv.innerHTML = '<div class="loader mx-auto"></div>';
+                const prompt = `Crie uma mensagem de anúncio curta e amigável para um aplicativo de chat sobre o seguinte tópico: "${topic}". Use um tom profissional, mas acessível.`;
+                const generatedText = await callGemini(prompt);
+                resultDiv.textContent = generatedText;
+                document.getElementById('announcement-text').value = generatedText;
+            }
+
+            if (target.id === 'download-backup-btn') {
+                target.disabled = true;
+                target.innerHTML = '<div class="loader"></div><span class="ml-2">Gerando...</span>';
+                try {
+                    const backupData = {};
+                    for (const name of ['users', 'messages', 'logs']) {
+                        const snapshot = await getDocs(query(collection(db, name)));
+                        backupData[name] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    }
+                    const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `firestore-backup-${new Date().toISOString().split('T')[0]}.json`;
+                    a.click();
+                    URL.revokeObjectURL(a.href);
+                } finally {
+                    target.disabled = false;
+                    target.innerHTML = 'Baixar Backup (JSON)';
+                }
+            }
+            if (target.id === 'restore-backup-btn') {
+                document.getElementById('restore-file-input').click();
+            }
+        });
+    </script>
+</body>
+</html>
