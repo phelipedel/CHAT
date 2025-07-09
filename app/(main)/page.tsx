@@ -252,12 +252,15 @@ export default function ChatPage() {
     }
   };
 
-  const playNotificationSound = () => {
-    if (soundEnabled) {
-      const audio = new Audio('/sounds/notification.mp3');
-      audio.play().catch(console.error);
-    }
-  };
+// CÓDIGO MODIFICADO COM UM LINK
+const playNotificationSound = () => {
+  if (soundEnabled) {
+    // Substitua esta URL pelo link do seu som
+    const audioUrl = 'https://www.myinstants.com/media/sounds/notification-sound-7062.mp3'; 
+    const audio = new Audio(audioUrl);
+    audio.play().catch(console.error);
+  }
+};
 
   const showSystemNotification = (title: string, options: NotificationOptions) => {
     if (notificationsEnabled && 'serviceWorker' in navigator) {
