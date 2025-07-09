@@ -2,14 +2,14 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { 
-  collection, 
-  addDoc, 
-  query, 
-  orderBy, 
-  onSnapshot, 
-  doc, 
-  updateDoc, 
+import {
+  collection,
+  addDoc,
+  query,
+  orderBy,
+  onSnapshot,
+  doc,
+  updateDoc,
   getDoc,
   serverTimestamp,
   where,
@@ -37,11 +37,11 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { 
-  Send, 
-  LogOut, 
-  Settings, 
-  Shield, 
+import {
+  Send,
+  LogOut,
+  Settings,
+  Shield,
   Users,
   Image as ImageIcon,
   Edit2,
@@ -64,6 +64,7 @@ import {
 } from 'lucide-react';
 import { ref, onValue, set, remove } from 'firebase/database';
 
+// --- Interfaces ---
 interface Message {
   id: string;
   text: string;
@@ -115,7 +116,9 @@ interface Chat {
   photoURL?: string;
 }
 
+// --- Componente ---
 export default function ChatPage() {
+  // --- Estados ---
   const [messages, setMessages] = useState<Message[]>([]);
   const [filteredMessages, setFilteredMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
@@ -140,10 +143,12 @@ export default function ChatPage() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
   
+  // --- Refs ---
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const router = useRouter();
 
+  // --- Efeitos ---
   useEffect(() => {
     const currentUser = auth.currentUser;
     if (currentUser) {
@@ -245,6 +250,7 @@ export default function ChatPage() {
     }
   }, [messages, user, selectedChat]);
 
+  // --- Funções ---
   const requestNotificationPermission = async () => {
     if ('Notification' in window) {
       const permission = await Notification.requestPermission();
@@ -252,15 +258,19 @@ export default function ChatPage() {
     }
   };
 
-// CÓDIGO MODIFICADO COM UM LINK
-const playNotificationSound = () => {
-  if (soundEnabled) {
-    // Substitua esta URL pelo link do seu som
-    const audioUrl = 'https://www.myinstants.com/media/sounds/notificacao.mp3'; 
-    const audio = new Audio(audioUrl);
-    audio.play().catch(console.error);
-  }
-};
+  const playNotificationSound = async () => {
+    if (soundEnabled) {
+      const audioUrl = 'https://www.myinstants.com/media/sounds/notification-sound-7062.mp3'; // Exemplo de URL
+      try {
+        const response = await fetch(audioUrl);
+        const blob = await response.blob();
+        const audio = new Audio(URL.createObjectURL(blob));
+        audio.play().catch(console.error);
+      } catch (error) {
+        console.error("Erro ao carregar o som da notificação:", error);
+      }
+    }
+  };
 
   const showSystemNotification = (title: string, options: NotificationOptions) => {
     if (notificationsEnabled && 'serviceWorker' in navigator) {
