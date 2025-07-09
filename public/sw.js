@@ -6,7 +6,7 @@ const urlsToCache = [
   '/manifest.json',
   '/icons/icon-192x192.png',
   '/icons/icon-512x512.png',
-  '/sounds/notification.mp3',
+  '/notifi/new-notification.mp3',
 ];
 
 // Instalar Service Worker
