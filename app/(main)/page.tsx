@@ -415,9 +415,8 @@ export default function ChatPage() {
 
   const loadMessages = () => {
     if (!selectedChat || !user) return undefined;
-
+  
     const chatId = selectedChat.id;
-    // CORREÇÃO APLICADA AQUI
     const otherMemberId = selectedChat.members.find(memberId => memberId !== user.uid) || '';
   
     const q = query(
@@ -433,7 +432,8 @@ export default function ChatPage() {
         const data = doc.data();
         const message = {
           id: doc.id,
-          text: selectedChat.isGroup ? data.text : decryptMessage(data.text, data.userId, otherMemberId),
+          // CORREÇÃO APLICADA AQUI
+          text: selectedChat.isGroup ? data.text : decryptMessage(data.text, user.uid, otherMemberId),
           userId: data.userId,
           userName: data.userName,
           userPhoto: data.userPhoto,
