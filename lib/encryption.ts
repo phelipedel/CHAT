@@ -12,28 +12,25 @@ function isLikelyEncrypted(str: string): boolean {
   if (typeof str !== 'string' || str.length < 16) {
     return false;
   }
-  // Verifica estritamente se a string começa com o prefixo único do CryptoJS
-  // 'U2FsdGVkX1' é o identificador único para strings criptografadas pelo CryptoJS
-  // usando o formato OpenSSL padrão
+  // A saída do CryptoJS.AES.encrypt com salt (padrão) começa com "U2FsdGVkX1".
+  // Esta é a verificação mais confiável para evitar a descriptografia de texto puro.
   return str.startsWith('U2FsdGVkX1');
 }
 
-
 /**
- * Gera uma chave única para cada conversa baseada nos UIDs dos participantes
+ * Gera uma chave única para cada conversa baseada nos UIDs dos participantes.
  * @param senderId - UID do remetente
  * @param receiverId - UID do destinatário
  * @returns Chave única para a conversa
  */
 function generateChatKey(senderId: string, receiverId: string): string {
-  // Ordena os UIDs para garantir que a chave seja a mesma, independentemente de quem envia
+  if (!senderId || !receiverId) return SECRET_KEY; // Fallback para a chave global
   const sortedIds = [senderId, receiverId].sort();
-  // Concatena com a chave secreta principal para gerar uma chave única por chat
   return `${sortedIds[0]}-${sortedIds[1]}-${SECRET_KEY}`;
 }
 
 /**
- * Criptografa uma mensagem usando AES com chave específica da conversa
+ * Criptografa uma mensagem usando AES com chave específica da conversa.
  * @param text - Texto a ser criptografado
  * @param senderId - UID do remetente
  * @param receiverId - UID do destinatário
@@ -46,19 +43,19 @@ export function encryptMessage(text: string, senderId: string, receiverId: strin
     return encrypted;
   } catch (error) {
     console.error('Erro ao criptografar mensagem:', error);
-    return text; // Retorna o texto original em caso de erro
+    return text;
   }
 }
 
 /**
- * Descriptografa uma mensagem usando AES com chave específica da conversa
+ * Descriptografa uma mensagem usando AES com chave específica da conversa.
  * @param encryptedText - Texto criptografado
  * @param senderId - UID do remetente
  * @param receiverId - UID do destinatário
  * @returns Texto descriptografado
  */
 export function decryptMessage(encryptedText: string, senderId: string, receiverId: string): string {
-  // CORREÇÃO: Verifica se o texto realmente parece estar criptografado antes de tentar.
+  // Se o texto não parece criptografado, retorne-o como está.
   if (!isLikelyEncrypted(encryptedText)) {
     return encryptedText;
   }
@@ -68,12 +65,14 @@ export function decryptMessage(encryptedText: string, senderId: string, receiver
     const decrypted = CryptoJS.AES.decrypt(encryptedText, chatKey);
     const result = decrypted.toString(CryptoJS.enc.Utf8);
     
+    // Se o resultado for uma string vazia, a descriptografia falhou.
     if (result) {
       return result;
     }
     
-    throw new Error('Falha na descriptografia com chave da conversa');
+    throw new Error('Falha na descriptografia com chave da conversa, tentando chave antiga.');
   } catch (error) {
+    // Tenta a descriptografia com a chave global como último recurso.
     try {
       const decrypted = CryptoJS.AES.decrypt(encryptedText, SECRET_KEY);
       const originalText = decrypted.toString(CryptoJS.enc.Utf8);
