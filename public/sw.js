@@ -6,6 +6,7 @@ const urlsToCache = [
   '/manifest.json',
   '/icons/icon-192x192.png',
   '/icons/icon-512x512.png',
+  '/sounds/notification.mp3',
 ];
 
 // Instalar Service Worker
@@ -64,4 +65,41 @@ self.addEventListener('activate', (event) => {
       );
     })
   );
+});
+
+// Handle notification clicks
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  
+  event.waitUntil(
+    clients.openWindow('/')
+  );
+});
+
+// Handle push notifications
+self.addEventListener('push', (event) => {
+  if (event.data) {
+    const data = event.data.json();
+    const options = {
+      body: data.body,
+      icon: data.icon || '/icons/icon-192x192.png',
+      badge: '/icons/icon-192x192.png',
+      tag: data.tag,
+      requireInteraction: false,
+      actions: [
+        {
+          action: 'reply',
+          title: 'Responder'
+        },
+        {
+          action: 'close',
+          title: 'Fechar'
+        }
+      ]
+    };
+    
+    event.waitUntil(
+      self.registration.showNotification(data.title, options)
+    );
+  }
 });

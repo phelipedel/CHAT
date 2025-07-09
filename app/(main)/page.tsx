@@ -16,7 +16,8 @@ import {
   getDocs,
   arrayUnion,
   arrayRemove,
-  setDoc
+  setDoc,
+  writeBatch
 } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { auth, db } from '@/lib/firebase';
@@ -26,6 +27,10 @@ import { setupUserPresence, addSystemLog, rtdb, updateUserStatus } from '@/lib/f
 import { generateUserID, isValidUserID } from '@/lib/utils';
 import { UserTags } from '@/components/ui/user-tags';
 import { MobileFriendsDrawer } from '@/components/ui/mobile-friends-drawer';
+import { MessageStatusIcon } from '@/components/ui/message-status-icon';
+import { ReactionPopover } from '@/components/ui/reaction-popover';
+import { ReactionPills } from '@/components/ui/reaction-pills';
+import { GroupChatModal } from '@/components/ui/group-chat-modal';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -51,9 +56,13 @@ import {
   Wifi,
   WifiOff,
   Eye,
-  Clock
+  Clock,
+  Search,
+  Plus,
+  Volume2,
+  VolumeX
 } from 'lucide-react';
-import { ref, onValue } from 'firebase/database';
+import { ref, onValue, set, remove } from 'firebase/database';
 
 interface Message {
   id: string;
@@ -64,6 +73,8 @@ interface Message {
   timestamp: any;
   isImage?: boolean;
   chatId: string;
+  readBy?: string[];
+  reactions?: { [emoji: string]: string[] };
 }
 
 interface User {
@@ -90,8 +101,23 @@ interface Friend {
   lastMessageTime?: any;
 }
 
+interface Chat {
+  id: string;
+  name?: string;
+  members: string[];
+  isGroup: boolean;
+  lastMessage?: {
+    text: string;
+    timestamp: any;
+    sender: string;
+  };
+  createdBy: string;
+  photoURL?: string;
+}
+
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
+  const [filteredMessages, setFilteredMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -99,13 +125,23 @@ export default function ChatPage() {
   const [newDisplayName, setNewDisplayName] = useState('');
   const [newPhotoURL, setNewPhotoURL] = useState('');
   const [friends, setFriends] = useState<Friend[]>([]);
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [selectedFriend, setSelectedFriend] = useState<Friend | null>(null);
   const [newFriendID, setNewFriendID] = useState('');
   const [addingFriend, setAddingFriend] = useState(false);
   const [copiedUserID, setCopiedUserID] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [statusMode, setStatusMode] = useState<'online' | 'offline' | 'hidden' | 'away'>('online');
+  const [isFriendTyping, setIsFriendTyping] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
+  const [showGroupModal, setShowGroupModal] = useState(false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -119,8 +155,9 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (user) {
-      loadFriends();
+      loadChats();
       setupUserPresence(user.uid, statusMode);
+      requestNotificationPermission();
     }
   }, [user]);
 
@@ -131,7 +168,7 @@ export default function ChatPage() {
   }, [statusMode, user]);
 
   useEffect(() => {
-    if (selectedFriend && user) {
+    if (selectedChat && user) {
       const unsubscribe = loadMessages();
       return () => {
         if (unsubscribe) {
@@ -139,7 +176,100 @@ export default function ChatPage() {
         }
       };
     }
-  }, [selectedFriend, user]);
+  }, [selectedChat, user]);
+
+  // Real-time status updates for selected friend
+  useEffect(() => {
+    if (selectedFriend?.uid) {
+      const statusRef = ref(rtdb, `/status/${selectedFriend.uid}`);
+      const unsubscribe = onValue(statusRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const status = snapshot.val();
+          setSelectedFriend(currentFriend => ({
+            ...currentFriend!,
+            status: status.state || 'offline',
+            lastSeen: status.last_changed
+          }));
+        }
+      });
+      return () => unsubscribe();
+    }
+  }, [selectedFriend?.uid]);
+
+  // Typing indicator listener
+  useEffect(() => {
+    if (selectedChat && user) {
+      const chatId = selectedChat.isGroup ? selectedChat.id : [user.uid, selectedFriend?.uid].sort().join('_');
+      const typingRef = ref(rtdb, `/typing/${chatId}`);
+      
+      const unsubscribe = onValue(typingRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const typingData = snapshot.val();
+          const isTyping = Object.keys(typingData).some(uid => uid !== user.uid && typingData[uid] === true);
+          setIsFriendTyping(isTyping);
+        } else {
+          setIsFriendTyping(false);
+        }
+      });
+      
+      return () => unsubscribe();
+    }
+  }, [selectedChat, user, selectedFriend]);
+
+  // Message search filter
+  useEffect(() => {
+    if (searchQuery.trim() === '') {
+      setFilteredMessages(messages);
+    } else {
+      const filtered = messages.filter(msg => 
+        msg.text.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+      setFilteredMessages(filtered);
+    }
+  }, [searchQuery, messages]);
+
+  // Mark messages as read
+  useEffect(() => {
+    if (messages.length > 0 && user && selectedChat) {
+      const unreadMessages = messages.filter(msg => 
+        msg.userId !== user.uid && 
+        (!msg.readBy || !msg.readBy.includes(user.uid))
+      );
+
+      if (unreadMessages.length > 0) {
+        const batch = writeBatch(db);
+        unreadMessages.forEach(msg => {
+          const msgRef = doc(db, 'messages', msg.id);
+          batch.update(msgRef, {
+            readBy: arrayUnion(user.uid)
+          });
+        });
+        batch.commit().catch(console.error);
+      }
+    }
+  }, [messages, user, selectedChat]);
+
+  const requestNotificationPermission = async () => {
+    if ('Notification' in window) {
+      const permission = await Notification.requestPermission();
+      setNotificationsEnabled(permission === 'granted');
+    }
+  };
+
+  const playNotificationSound = () => {
+    if (soundEnabled) {
+      const audio = new Audio('/sounds/notification.mp3');
+      audio.play().catch(console.error);
+    }
+  };
+
+  const showSystemNotification = (title: string, options: NotificationOptions) => {
+    if (notificationsEnabled && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.ready.then(registration => {
+        registration.showNotification(title, options);
+      });
+    }
+  };
 
   const loadUserData = async (userId: string) => {
     try {
@@ -203,58 +333,36 @@ export default function ChatPage() {
     setLoading(false);
   };
 
-  const loadFriends = async () => {
-    if (!user || !user.friends || user.friends.length === 0) {
-      setFriends([]);
-      return;
-    }
-  
+  const loadChats = async () => {
+    if (!user) return;
+
     try {
-      const friendsData: Friend[] = [];
-      const unsubscribes: Function[] = [];
-  
-      for (const friendUID of user.friends) {
-        const friendDoc = await getDoc(doc(db, 'users', friendUID));
-        if (friendDoc.exists()) {
-          const friendData = friendDoc.data();
-          const friend: Friend = {
-            uid: friendUID,
-            userID: friendData.userID,
-            displayName: friendData.displayName,
-            photoURL: friendData.photoURL,
-            tags: friendData.tags || [],
-            status: 'offline'
-          };
-  
-          const statusRef = ref(rtdb, `/status/${friendUID}`);
-          const unsubscribe = onValue(statusRef, (snapshot) => {
-            if (snapshot.exists()) {
-              const status = snapshot.val();
-              setFriends(prev => prev.map(f => 
-                f.uid === friendUID 
-                  ? { ...f, status: status.state, lastSeen: status.last_changed }
-                  : f
-              ));
-            }
-          });
-          unsubscribes.push(unsubscribe);
-          friendsData.push(friend);
-        }
-      }
-      setFriends(friendsData);
-  
-      return () => {
-        unsubscribes.forEach(unsub => unsub());
-      };
+      const q = query(
+        collection(db, 'chats'),
+        where('members', 'array-contains', user.uid)
+      );
+      
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const chatsData: Chat[] = [];
+        snapshot.forEach((doc) => {
+          chatsData.push({
+            id: doc.id,
+            ...doc.data()
+          } as Chat);
+        });
+        setChats(chatsData);
+      });
+
+      return unsubscribe;
     } catch (error) {
-      console.error('Erro ao carregar amigos:', error);
+      console.error('Erro ao carregar chats:', error);
     }
   };
 
   const loadMessages = () => {
-    if (!selectedFriend || !user) return undefined;
+    if (!selectedChat || !user) return undefined;
 
-    const chatId = [user.uid, selectedFriend.uid].sort().join('_');
+    const chatId = selectedChat.id;
     const q = query(
       collection(db, 'messages'), 
       where('chatId', '==', chatId),
@@ -263,24 +371,87 @@ export default function ChatPage() {
     
     return onSnapshot(q, (snapshot) => {
       const loadedMessages: Message[] = [];
+      
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === 'added') {
+          const data = change.doc.data();
+          const message = {
+            id: change.doc.id,
+            text: selectedChat.isGroup ? data.text : decryptMessage(data.text, user.uid, selectedFriend?.uid || ''),
+            userId: data.userId,
+            userName: data.userName,
+            userPhoto: data.userPhoto,
+            timestamp: data.timestamp,
+            isImage: data.isImage || false,
+            chatId: data.chatId,
+            readBy: data.readBy || [],
+            reactions: data.reactions || {}
+          };
+          
+          loadedMessages.push(message);
+          
+          // Show notification for new messages
+          if (data.userId !== user.uid && !document.hasFocus()) {
+            playNotificationSound();
+            showSystemNotification(`Nova mensagem de ${data.userName}`, {
+              body: message.text,
+              icon: data.userPhoto,
+              tag: chatId
+            });
+          }
+        }
+      });
+      
       snapshot.forEach((doc) => {
         const data = doc.data();
-        loadedMessages.push({
+        const message = {
           id: doc.id,
-          text: decryptMessage(data.text, user.uid, selectedFriend.uid),
+          text: selectedChat.isGroup ? data.text : decryptMessage(data.text, user.uid, selectedFriend?.uid || ''),
           userId: data.userId,
           userName: data.userName,
           userPhoto: data.userPhoto,
           timestamp: data.timestamp,
           isImage: data.isImage || false,
-          chatId: data.chatId
-        });
+          chatId: data.chatId,
+          readBy: data.readBy || [],
+          reactions: data.reactions || {}
+        };
+        
+        if (!loadedMessages.find(m => m.id === message.id)) {
+          loadedMessages.push(message);
+        }
       });
+      
+      loadedMessages.sort((a, b) => {
+        if (!a.timestamp || !b.timestamp) return 0;
+        return a.timestamp.toMillis() - b.timestamp.toMillis();
+      });
+      
       setMessages(loadedMessages);
       scrollToBottom();
     }, (error) => {
-        console.error("Erro no listener do onSnapshot: ", error);
+      console.error("Erro no listener do onSnapshot: ", error);
     });
+  };
+
+  const handleTyping = () => {
+    if (!selectedChat || !user) return;
+
+    const chatId = selectedChat.isGroup ? selectedChat.id : [user.uid, selectedFriend?.uid].sort().join('_');
+    const typingRef = ref(rtdb, `/typing/${chatId}/${user.uid}`);
+
+    // Clear existing timeout
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    // Set typing status
+    set(typingRef, true);
+
+    // Remove typing status after 2 seconds
+    typingTimeoutRef.current = setTimeout(() => {
+      remove(typingRef);
+    }, 2000);
   };
 
   const scrollToBottom = () => {
@@ -289,27 +460,106 @@ export default function ChatPage() {
 
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMessage.trim() || !user || !selectedFriend) return;
+    if (!newMessage.trim() || !user || !selectedChat) return;
 
     const isImageUrl = newMessage.match(/\.(jpeg|jpg|gif|png|webp|svg)$/i) || 
                        newMessage.includes('images.unsplash.com') ||
                        newMessage.includes('via.placeholder.com');
 
-    const chatId = [user.uid, selectedFriend.uid].sort().join('_');
+    const chatId = selectedChat.id;
 
     try {
+      const messageText = selectedChat.isGroup ? newMessage : encryptMessage(newMessage, user.uid, selectedFriend?.uid || '');
+      
       await addDoc(collection(db, 'messages'), {
-        text: encryptMessage(newMessage, user.uid, selectedFriend.uid),
+        text: messageText,
         userId: user.uid,
         userName: user.displayName,
         userPhoto: user.photoURL,
         timestamp: serverTimestamp(),
         isImage: Boolean(isImageUrl),
-        chatId: chatId
+        chatId: chatId,
+        readBy: [user.uid],
+        reactions: {}
       });
+
+      // Update last message in chat
+      await updateDoc(doc(db, 'chats', chatId), {
+        lastMessage: {
+          text: newMessage,
+          timestamp: serverTimestamp(),
+          sender: user.uid
+        }
+      });
+
       setNewMessage('');
+      
+      // Clear typing indicator
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+      const typingRef = ref(rtdb, `/typing/${chatId}/${user.uid}`);
+      remove(typingRef);
     } catch (error) {
       console.error('Erro ao enviar mensagem:', error);
+    }
+  };
+
+  const handleReaction = async (message: Message, emoji: string) => {
+    if (!user) return;
+
+    try {
+      const messageRef = doc(db, 'messages', message.id);
+      const currentReactions = message.reactions || {};
+      const userReactions = Object.keys(currentReactions).filter(e => 
+        currentReactions[e].includes(user.uid)
+      );
+
+      const batch = writeBatch(db);
+
+      // Remove user from other reactions
+      userReactions.forEach(reactionEmoji => {
+        if (reactionEmoji !== emoji) {
+          batch.update(messageRef, {
+            [`reactions.${reactionEmoji}`]: arrayRemove(user.uid)
+          });
+        }
+      });
+
+      // Toggle current reaction
+      const currentEmojiReactions = currentReactions[emoji] || [];
+      if (currentEmojiReactions.includes(user.uid)) {
+        batch.update(messageRef, {
+          [`reactions.${emoji}`]: arrayRemove(user.uid)
+        });
+      } else {
+        batch.update(messageRef, {
+          [`reactions.${emoji}`]: arrayUnion(user.uid)
+        });
+      }
+
+      await batch.commit();
+    } catch (error) {
+      console.error('Erro ao adicionar reação:', error);
+    }
+  };
+
+  const createGroupChat = async (selectedFriends: string[], groupName: string) => {
+    if (!user) return;
+
+    try {
+      const members = [user.uid, ...selectedFriends];
+      await addDoc(collection(db, 'chats'), {
+        name: groupName,
+        members,
+        isGroup: true,
+        createdBy: user.uid,
+        photoURL: 'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?w=150&h=150&fit=crop&crop=face',
+        lastMessage: null
+      });
+      setShowGroupModal(false);
+    } catch (error) {
+      console.error('Erro ao criar grupo:', error);
     }
   };
 
@@ -356,6 +606,24 @@ export default function ChatPage() {
       await updateDoc(doc(db, 'users', friendUID), {
         friends: arrayUnion(user.uid)
       });
+
+      // Create or find existing 1-on-1 chat
+      const existingChatQuery = query(
+        collection(db, 'chats'),
+        where('members', '==', [user.uid, friendUID].sort()),
+        where('isGroup', '==', false)
+      );
+      
+      const existingChatSnapshot = await getDocs(existingChatQuery);
+      
+      if (existingChatSnapshot.empty) {
+        await addDoc(collection(db, 'chats'), {
+          members: [user.uid, friendUID].sort(),
+          isGroup: false,
+          createdBy: user.uid,
+          lastMessage: null
+        });
+      }
       
       const newFriend: Friend = {
         uid: friendUID,
@@ -367,7 +635,6 @@ export default function ChatPage() {
       };
       
       setFriends(prev => [...prev, newFriend]);
-      setSelectedFriend(newFriend);
 
       setUser({
         ...user,
@@ -460,6 +727,32 @@ export default function ChatPage() {
     }
   };
 
+  const selectChat = (chat: Chat) => {
+    setSelectedChat(chat);
+    if (!chat.isGroup) {
+      // Find the friend for 1-on-1 chat
+      const friendUID = chat.members.find(uid => uid !== user?.uid);
+      if (friendUID) {
+        // Load friend data
+        getDoc(doc(db, 'users', friendUID)).then(friendDoc => {
+          if (friendDoc.exists()) {
+            const friendData = friendDoc.data();
+            setSelectedFriend({
+              uid: friendUID,
+              userID: friendData.userID,
+              displayName: friendData.displayName,
+              photoURL: friendData.photoURL,
+              tags: friendData.tags || [],
+              status: 'offline'
+            });
+          }
+        });
+      }
+    } else {
+      setSelectedFriend(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="h-screen flex items-center justify-center bg-black">
@@ -473,7 +766,7 @@ export default function ChatPage() {
 
   return (
     <div className="h-screen [-webkit-app-region:no-drag] flex bg-black text-white overflow-hidden">
-      <MobileFriendsDrawer friendsCount={friends.length}>
+      <MobileFriendsDrawer friendsCount={chats.length}>
         <div className="flex flex-col h-full overflow-hidden">
           <div className="p-4 border-b border-gray-700">
             <div className="flex items-center gap-3 mb-3">
@@ -522,7 +815,7 @@ export default function ChatPage() {
             <div className="mb-2">
               <p className="text-xs text-gray-400 mb-1">Adicionar amigo pelo ID:</p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 mb-2">
               <Input
                 value={newFriendID}
                 onChange={(e) => setNewFriendID(e.target.value)}
@@ -547,68 +840,53 @@ export default function ChatPage() {
                 )}
               </Button>
             </div>
+            <Button
+              onClick={() => setShowGroupModal(true)}
+              className="w-full bg-purple-600 hover:bg-purple-700 text-white"
+              size="sm"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Criar Grupo
+            </Button>
           </div>
           
           <div className="flex-1 overflow-y-auto scrollbar-hide">
             <div className="p-2">
-              <h3 className="text-gray-400 text-sm font-medium mb-2 px-2">Amigos ({friends.length})</h3>
-              {friends.length === 0 ? (
+              <h3 className="text-gray-400 text-sm font-medium mb-2 px-2">Conversas ({chats.length})</h3>
+              {chats.length === 0 ? (
                 <div className="text-center py-8">
                   <MessageCircle className="h-8 w-8 text-gray-600 mx-auto mb-2" />
-                  <p className="text-gray-500 text-sm">Nenhum amigo adicionado</p>
-                  <p className="text-gray-600 text-xs">Adicione amigos usando o ID deles</p>
+                  <p className="text-gray-500 text-sm">Nenhuma conversa</p>
+                  <p className="text-gray-600 text-xs">Adicione amigos para começar</p>
                 </div>
               ) : (
                 <div className="space-y-1">
-                  {friends.map((friend) => (
+                  {chats.map((chat) => (
                     <div
-                      key={friend.uid}
+                      key={chat.id}
                       className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors group ${
-                        selectedFriend?.uid === friend.uid 
+                        selectedChat?.id === chat.id 
                           ? 'bg-gray-700' 
                           : 'hover:bg-gray-800'
                       }`}
-                      onClick={() => setSelectedFriend(friend)}
+                      onClick={() => selectChat(chat)}
                     >
-                      <div className="relative">
-                        <Avatar className="h-10 w-10">
-                          <AvatarImage src={friend.photoURL} />
-                          <AvatarFallback className="bg-gray-700 text-white">
-                            {friend.displayName?.charAt(0)}
-                          </AvatarFallback>
-                        </Avatar>
-                        {friend.status && friend.status !== 'hidden' && (
-                          <div className={`absolute -bottom-1 -right-1 h-4 w-4 rounded-full border-2 border-gray-900 flex items-center justify-center ${
-                            friend.status === 'online' 
-                              ? 'bg-green-500' 
-                              : friend.status === 'away'
-                              ? 'bg-yellow-500'
-                              : 'bg-gray-500'
-                          }`}>
-                            {friend.status === 'away' && (
-                              <Clock className="h-2 w-2 text-white" />
-                            )}
-                          </div>
+                      <Avatar className="h-10 w-10">
+                        <AvatarImage src={chat.photoURL} />
+                        <AvatarFallback className="bg-gray-700 text-white">
+                          {chat.isGroup ? chat.name?.charAt(0) : 'U'}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 min-w-0">
+                        <h4 className="text-white font-medium truncate">
+                          {chat.isGroup ? chat.name : 'Chat Privado'}
+                        </h4>
+                        {chat.lastMessage && (
+                          <p className="text-gray-400 text-xs truncate">
+                            {chat.lastMessage.text}
+                          </p>
                         )}
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-white font-medium truncate">{friend.displayName}</h4>
-                          {friend.tags && <UserTags tags={friend.tags} size="sm" />}
-                        </div>
-                        <p className="text-gray-400 text-xs">{friend.userID}</p>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeFriend(friend.uid);
-                        }}
-                        className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-400 hover:bg-gray-700"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
                     </div>
                   ))}
                 </div>
@@ -669,6 +947,14 @@ export default function ChatPage() {
               className="text-gray-400 hover:text-white hover:bg-gray-800"
             >
               <Settings className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSoundEnabled(!soundEnabled)}
+              className="text-gray-400 hover:text-white hover:bg-gray-800"
+            >
+              {soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
             </Button>
             {user?.isAdmin && (
               <Button
@@ -774,7 +1060,7 @@ export default function ChatPage() {
           <div className="mb-2">
             <p className="text-xs text-gray-400 mb-1">Adicionar amigo pelo ID:</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 mb-2">
             <Input
               value={newFriendID}
               onChange={(e) => setNewFriendID(e.target.value)}
@@ -799,68 +1085,53 @@ export default function ChatPage() {
               )}
             </Button>
           </div>
+          <Button
+            onClick={() => setShowGroupModal(true)}
+            className="w-full bg-purple-600 hover:bg-purple-700 text-white"
+            size="sm"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Criar Grupo
+          </Button>
         </div>
         
         <div className="flex-1 overflow-y-auto scrollbar-hide">
           <div className="p-2">
-            <h3 className="text-gray-400 text-sm font-medium mb-2 px-2">Amigos ({friends.length})</h3>
-            {friends.length === 0 ? (
+            <h3 className="text-gray-400 text-sm font-medium mb-2 px-2">Conversas ({chats.length})</h3>
+            {chats.length === 0 ? (
               <div className="text-center py-8">
                 <MessageCircle className="h-8 w-8 text-gray-600 mx-auto mb-2" />
-                <p className="text-gray-500 text-sm">Nenhum amigo adicionado</p>
-                <p className="text-gray-600 text-xs">Adicione amigos usando o ID deles</p>
+                <p className="text-gray-500 text-sm">Nenhuma conversa</p>
+                <p className="text-gray-600 text-xs">Adicione amigos para começar</p>
               </div>
             ) : (
               <div className="space-y-1">
-                {friends.map((friend) => (
+                {chats.map((chat) => (
                   <div
-                    key={friend.uid}
+                    key={chat.id}
                     className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors group ${
-                      selectedFriend?.uid === friend.uid 
+                      selectedChat?.id === chat.id 
                         ? 'bg-gray-700' 
                         : 'hover:bg-gray-800'
                     }`}
-                    onClick={() => setSelectedFriend(friend)}
+                    onClick={() => selectChat(chat)}
                   >
-                    <div className="relative">
-                      <Avatar className="h-10 w-10">
-                        <AvatarImage src={friend.photoURL} />
-                        <AvatarFallback className="bg-gray-700 text-white">
-                          {friend.displayName?.charAt(0)}
-                        </AvatarFallback>
-                      </Avatar>
-                      {friend.status && friend.status !== 'hidden' && (
-                        <div className={`absolute -bottom-1 -right-1 h-4 w-4 rounded-full border-2 border-gray-900 flex items-center justify-center ${
-                          friend.status === 'online' 
-                            ? 'bg-green-500' 
-                            : friend.status === 'away'
-                            ? 'bg-yellow-500'
-                            : 'bg-gray-500'
-                        }`}>
-                          {friend.status === 'away' && (
-                            <Clock className="h-2 w-2 text-white" />
-                          )}
-                        </div>
+                    <Avatar className="h-10 w-10">
+                      <AvatarImage src={chat.photoURL} />
+                      <AvatarFallback className="bg-gray-700 text-white">
+                        {chat.isGroup ? chat.name?.charAt(0) : 'U'}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-white font-medium truncate">
+                        {chat.isGroup ? chat.name : 'Chat Privado'}
+                      </h4>
+                      {chat.lastMessage && (
+                        <p className="text-gray-400 text-xs truncate">
+                          {chat.lastMessage.text}
+                        </p>
                       )}
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <h4 className="text-white font-medium truncate">{friend.displayName}</h4>
-                        {friend.tags && <UserTags tags={friend.tags} size="sm" />}
-                      </div>
-                      <p className="text-gray-400 text-xs">{friend.userID}</p>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeFriend(friend.uid);
-                      }}
-                      className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-400 hover:bg-gray-700"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
                   </div>
                 ))}
               </div>
@@ -870,51 +1141,80 @@ export default function ChatPage() {
       </div>
 
       <div className="flex-1 flex flex-col min-w-0 h-screen sm:h-auto">
-        {selectedFriend ? (
+        {selectedChat ? (
           <>
             <div className="bg-gray-900 border-b border-gray-700 p-4">
-              <div className="flex items-center gap-3">
-                <Avatar className="h-10 w-10">
-                  <AvatarImage src={selectedFriend.photoURL} />
-                  <AvatarFallback className="bg-gray-700 text-white">
-                    {selectedFriend.displayName?.charAt(0)}
-                  </AvatarFallback>
-                </Avatar>
-                <div>
-                  <h2 className="text-white font-semibold">{selectedFriend.displayName}</h2>
-                  <div className="flex items-center gap-2">
-                    <p className="text-gray-400 text-sm">{selectedFriend.userID}</p>
-                    {selectedFriend.status && selectedFriend.status !== 'hidden' && (
-                      <Badge 
-                        variant="secondary" 
-                        className={`text-xs ${
-                          selectedFriend.status === 'online' 
-                            ? 'bg-green-600 text-white' 
-                            : selectedFriend.status === 'away'
-                            ? 'bg-yellow-600 text-white'
-                            : 'bg-gray-600 text-white'
-                        }`}
-                      >
-                        {selectedFriend.status === 'online' && <Circle className="h-2 w-2 mr-1 fill-current" />}
-                        {selectedFriend.status === 'away' && <Clock className="h-2 w-2 mr-1" />}
-                        {selectedFriend.status === 'offline' && <Circle className="h-2 w-2 mr-1 fill-current" />}
-                        {selectedFriend.status === 'online' ? 'Online' : 
-                         selectedFriend.status === 'away' ? 'Ausente' : 'Offline'}
-                      </Badge>
-                    )}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Avatar className="h-10 w-10">
+                    <AvatarImage src={selectedChat.isGroup ? selectedChat.photoURL : selectedFriend?.photoURL} />
+                    <AvatarFallback className="bg-gray-700 text-white">
+                      {selectedChat.isGroup ? selectedChat.name?.charAt(0) : selectedFriend?.displayName?.charAt(0)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <h2 className="text-white font-semibold">
+                      {selectedChat.isGroup ? selectedChat.name : selectedFriend?.displayName}
+                    </h2>
+                    <div className="flex items-center gap-2">
+                      {!selectedChat.isGroup && selectedFriend && (
+                        <>
+                          <p className="text-gray-400 text-sm">{selectedFriend.userID}</p>
+                          {selectedFriend.status && selectedFriend.status !== 'hidden' && (
+                            <Badge 
+                              variant="secondary" 
+                              className={`text-xs ${
+                                selectedFriend.status === 'online' 
+                                  ? 'bg-green-600 text-white' 
+                                  : selectedFriend.status === 'away'
+                                  ? 'bg-yellow-600 text-white'
+                                  : 'bg-gray-600 text-white'
+                              }`}
+                            >
+                              {selectedFriend.status === 'online' && <Circle className="h-2 w-2 mr-1 fill-current" />}
+                              {selectedFriend.status === 'away' && <Clock className="h-2 w-2 mr-1" />}
+                              {selectedFriend.status === 'offline' && <Circle className="h-2 w-2 mr-1 fill-current" />}
+                              {selectedFriend.status === 'online' ? 'Online' : 
+                               selectedFriend.status === 'away' ? 'Ausente' : 'Offline'}
+                            </Badge>
+                          )}
+                        </>
+                      )}
+                      {selectedChat.isGroup && (
+                        <p className="text-gray-400 text-sm">{selectedChat.members.length} membros</p>
+                      )}
+                    </div>
                   </div>
                 </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowSearch(!showSearch)}
+                  className="text-gray-400 hover:text-white hover:bg-gray-800"
+                >
+                  <Search className="h-4 w-4" />
+                </Button>
               </div>
+              {showSearch && (
+                <div className="mt-3">
+                  <Input
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Pesquisar mensagens..."
+                    className="bg-gray-700 border-gray-600 text-white placeholder-gray-400"
+                  />
+                </div>
+              )}
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-800 scrollbar-hide">
-              {messages.map((message) => (
+              {filteredMessages.map((message) => (
                 <div
                   key={message.id}
                   className={`flex ${message.userId === user?.uid ? 'justify-end' : 'justify-start'}`}
                 >
                   <div
-                    className={`max-w-[70%] rounded-lg p-3 ${
+                    className={`max-w-[70%] rounded-lg p-3 relative group ${
                       message.userId === user?.uid
                         ? 'bg-white text-black'
                         : 'bg-gray-700 text-white'
@@ -949,15 +1249,50 @@ export default function ChatPage() {
                     ) : (
                       <p className="break-words">{message.text}</p>
                     )}
+
+                    <ReactionPills 
+                      reactions={message.reactions || {}} 
+                      onReactionClick={(emoji) => handleReaction(message, emoji)}
+                      currentUserId={user?.uid || ''}
+                    />
                     
-                    <p className={`text-xs mt-1 ${
-                      message.userId === user?.uid ? 'text-gray-600' : 'text-gray-400'
-                    }`}>
-                      {message.timestamp?.toDate?.().toLocaleTimeString() || 'Enviando...'}
-                    </p>
+                    <div className="flex items-center justify-between mt-1">
+                      <p className={`text-xs ${
+                        message.userId === user?.uid ? 'text-gray-600' : 'text-gray-400'
+                      }`}>
+                        {message.timestamp?.toDate?.().toLocaleTimeString() || 'Enviando...'}
+                      </p>
+                      {message.userId === user?.uid && (
+                        <MessageStatusIcon 
+                          message={message} 
+                          currentUser={user} 
+                          selectedFriend={selectedFriend}
+                        />
+                      )}
+                    </div>
+
+                    <ReactionPopover 
+                      onReactionSelect={(emoji) => handleReaction(message, emoji)}
+                    />
                   </div>
                 </div>
               ))}
+              
+              {isFriendTyping && (
+                <div className="flex justify-start">
+                  <div className="bg-gray-700 text-white rounded-lg p-3 max-w-[70%]">
+                    <div className="flex items-center gap-2">
+                      <div className="flex space-x-1">
+                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                      </div>
+                      <span className="text-sm text-gray-400">digitando...</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
               <div ref={messagesEndRef} />
             </div>
 
@@ -965,7 +1300,10 @@ export default function ChatPage() {
               <form onSubmit={sendMessage} className="flex gap-2">
                 <Input
                   value={newMessage}
-                  onChange={(e) => setNewMessage(e.target.value)}
+                  onChange={(e) => {
+                    setNewMessage(e.target.value);
+                    handleTyping();
+                  }}
                   placeholder="Digite sua mensagem ou cole uma URL de imagem..."
                   className="flex-1 bg-gray-700 border-gray-600 text-white placeholder-gray-400 focus:ring-2 focus:ring-white"
                 />
@@ -987,12 +1325,20 @@ export default function ChatPage() {
           <div className="flex-1 flex items-center justify-center bg-gray-800 p-4">
             <div className="text-center">
               <MessageCircle className="h-16 w-16 text-gray-600 mx-auto mb-4" />
-              <h2 className="text-xl font-semibold text-white mb-2">Selecione um amigo</h2>
-              <p className="text-gray-400 text-center">Escolha um amigo da lista para começar a conversar</p>
+              <h2 className="text-xl font-semibold text-white mb-2">Selecione uma conversa</h2>
+              <p className="text-gray-400 text-center">Escolha uma conversa da lista para começar a conversar</p>
             </div>
           </div>
         )}
       </div>
+
+      {showGroupModal && (
+        <GroupChatModal
+          friends={friends}
+          onClose={() => setShowGroupModal(false)}
+          onCreateGroup={createGroupChat}
+        />
+      )}
     </div>
   );
 }
