@@ -417,7 +417,6 @@ export default function ChatPage() {
     if (!selectedChat || !user) return undefined;
   
     const chatId = selectedChat.id;
-    // CORREÇÃO: Garante que os membros do chat sejam usados para a chave.
     const [member1, member2] = selectedChat.members;
   
     const q = query(
@@ -455,7 +454,8 @@ export default function ChatPage() {
             showSystemNotification(`Nova mensagem de ${data.userName}`, {
               body: message.text,
               icon: data.userPhoto,
-              tag: chatId
+              tag: chatId,
+              data: { url: window.location.origin }
             });
           }
         }
@@ -638,7 +638,6 @@ export default function ChatPage() {
         friends: arrayUnion(user.uid)
       });
       
-      // Recarrega os chats para incluir o novo amigo
       loadChats();
 
       setNewFriendID('');
