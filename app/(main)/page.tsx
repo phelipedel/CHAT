@@ -432,8 +432,7 @@ export default function ChatPage() {
         const data = doc.data();
         const message = {
           id: doc.id,
-          // CORREÇÃO APLICADA AQUI
-          text: selectedChat.isGroup ? data.text : decryptMessage(data.text, user.uid, otherMemberId),
+          text: selectedChat.isGroup ? data.text : decryptMessage(data.text, data.userId, user.uid),
           userId: data.userId,
           userName: data.userName,
           userPhoto: data.userPhoto,
@@ -638,44 +637,8 @@ export default function ChatPage() {
         friends: arrayUnion(user.uid)
       });
 
-      const sortedMembers = [user.uid, friendUID].sort();
-      const chatsQuery = query(collection(db, 'chats'), where('isGroup', '==', false));
-      const chatsSnapshot = await getDocs(chatsQuery);
-      
-      let existingChat = null;
-      chatsSnapshot.forEach(doc => {
-        const chatData = doc.data();
-        if (chatData.members.length === 2 && 
-            chatData.members.includes(user.uid) && 
-            chatData.members.includes(friendUID)) {
-          existingChat = doc;
-        }
-      });
-      
-      if (!existingChat) {
-        await addDoc(collection(db, 'chats'), {
-          members: sortedMembers,
-          isGroup: false,
-          createdBy: user.uid,
-          lastMessage: null
-        });
-      }
-      
-      const newFriend: Friend = {
-        uid: friendUID,
-        userID: friendData.userID,
-        displayName: friendData.displayName,
-        photoURL: friendData.photoURL,
-        tags: friendData.tags || [],
-        status: 'offline',
-      };
-      
-      setFriends(prev => [...prev, newFriend]);
-
-      setUser({
-        ...user,
-        friends: [...user.friends, friendUID]
-      });
+      // Recarrega a lista de chats para refletir a nova amizade
+      loadChats();
 
       setNewFriendID('');
       alert(`${friendData.displayName} foi adicionado como amigo!`);
