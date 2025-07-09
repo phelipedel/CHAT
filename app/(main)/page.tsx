@@ -2,14 +2,14 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import {
-  collection,
-  addDoc,
-  query,
-  orderBy,
-  onSnapshot,
-  doc,
-  updateDoc,
+import { 
+  collection, 
+  addDoc, 
+  query, 
+  orderBy, 
+  onSnapshot, 
+  doc, 
+  updateDoc, 
   getDoc,
   serverTimestamp,
   where,
@@ -37,11 +37,11 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import {
-  Send,
-  LogOut,
-  Settings,
-  Shield,
+import { 
+  Send, 
+  LogOut, 
+  Settings, 
+  Shield, 
   Users,
   Image as ImageIcon,
   Save,
@@ -154,7 +154,7 @@ export default function ChatPage() {
       return bTimestamp - aTimestamp;
     });
   };
-
+  
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -166,7 +166,7 @@ export default function ChatPage() {
     } else {
       router.push('/login');
     }
-  }, [router]);
+  }, []);
 
   useEffect(() => {
     if (user) {
@@ -178,7 +178,7 @@ export default function ChatPage() {
       }
     }
   }, [user]);
-  
+
   useEffect(() => {
     if (user && sortedChats.length > 0) {
       const unsubscribes = sortedChats.map(chat => {
@@ -350,17 +350,14 @@ export default function ChatPage() {
         const q = query(collection(db, 'messages'), where('chatId', '==', chatId), orderBy('timestamp', 'asc'));
         
         return onSnapshot(q, (snapshot) => {
-          const loadedMessages: Message[] = [];
-          snapshot.forEach((doc) => {
+          setMessages(snapshot.docs.map(doc => {
             const data = doc.data();
-            const message = {
+            return {
               id: doc.id,
               ...data,
               text: selectedChat.isGroup ? data.text : decryptMessage(data.text, data.userId, user.uid === data.userId ? selectedFriend?.uid || '' : user.uid),
             } as Message;
-            loadedMessages.push(message);
-          });
-          setMessages(loadedMessages);
+          }));
           scrollToBottom();
         }, (error) => console.error("Erro no listener de mensagens: ", error));
       };
@@ -518,7 +515,7 @@ export default function ChatPage() {
         setCopiedUserID(true);
         setTimeout(() => setCopiedUserID(false), 2000);
       };
-  
+
       const handleTyping = () => {
         if (!selectedChat || !user || !selectedFriend) return;
       
@@ -535,7 +532,7 @@ export default function ChatPage() {
           remove(typingRef);
         }, 2000);
       };
-
+  
   if (loading) {
     return (
       <div className="h-screen flex items-center justify-center bg-black">
