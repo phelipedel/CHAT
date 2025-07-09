@@ -2,14 +2,14 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { 
-  collection, 
-  addDoc, 
-  query, 
-  orderBy, 
-  onSnapshot, 
-  doc, 
-  updateDoc, 
+import {
+  collection,
+  addDoc,
+  query,
+  orderBy,
+  onSnapshot,
+  doc,
+  updateDoc,
   getDoc,
   serverTimestamp,
   where,
@@ -37,11 +37,11 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { 
-  Send, 
-  LogOut, 
-  Settings, 
-  Shield, 
+import {
+  Send,
+  LogOut,
+  Settings,
+  Shield,
   Users,
   Image as ImageIcon,
   Save,
@@ -139,13 +139,15 @@ export default function ChatPage() {
   const [showGroupModal, setShowGroupModal] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
-  
+
   const [unreadCounts, setUnreadCounts] = useState<{ [chatId: string]: number }>({});
   const [sortedChats, setSortedChats] = useState<DisplayChat[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const router = useRouter();
+
+  // ... (O restante das funções e useEffects permanecem os mesmos)
 
   const sortChatsByActivity = (chatsToSort: DisplayChat[]) => {
     return [...chatsToSort].sort((a, b) => {
@@ -162,7 +164,7 @@ export default function ChatPage() {
     } else {
       router.push('/login');
     }
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (user) {
@@ -174,11 +176,14 @@ export default function ChatPage() {
       }
     }
   }, [user]);
-  
+
   useEffect(() => {
     if (user && sortedChats.length > 0) {
       const unsubscribes = sortedChats.map(chat => {
-        const q = query(collection(db, 'messages'), where('chatId', '==', chat.id));
+        const q = query(
+          collection(db, 'messages'),
+          where('chatId', '==', chat.id)
+        );
         return onSnapshot(q, (messageSnapshot) => {
           if (!user) return;
           const count = messageSnapshot.docs.filter(
@@ -187,6 +192,7 @@ export default function ChatPage() {
           setUnreadCounts(prev => ({ ...prev, [chat.id]: count }));
         });
       });
+
       return () => unsubscribes.forEach(unsub => unsub());
     }
   }, [user, sortedChats]);
@@ -205,11 +211,11 @@ export default function ChatPage() {
       };
     }
   }, [selectedChat, user]);
-  
+
   useEffect(() => {
     if (messages.length > 0 && user && selectedChat) {
-      const unreadMessages = messages.filter(msg => 
-        msg.userId !== user.uid && 
+      const unreadMessages = messages.filter(msg =>
+        msg.userId !== user.uid &&
         (!msg.readBy || !msg.readBy.includes(user.uid))
       );
       if (unreadMessages.length > 0) {
@@ -223,140 +229,162 @@ export default function ChatPage() {
     }
   }, [messages, user, selectedChat]);
   
-  const loadUserData = async (userId: string) => {
-    try {
-      const userDoc = await getDoc(doc(db, 'users', userId));
-      if (userDoc.exists()) {
-        const userData = userDoc.data();
-        let userID = userData.userID;
-        if (!userID) {
-          userID = generateUserID();
-          await updateDoc(doc(db, 'users', userId), { userID });
+    // ... (restante das funções e useEffects)
+    const requestNotificationPermission = async () => {
+        if ('Notification' in window) {
+          const permission = await Notification.requestPermission();
+          setNotificationsEnabled(permission === 'granted');
         }
-        setUser({ uid: userId, ...userData, userID, friends: userData.friends || [] } as User);
-        setNewDisplayName(userData.displayName);
-        setNewPhotoURL(userData.photoURL);
-        setStatusMode(userData.statusMode || 'online');
-      } else {
-        const currentUser = auth.currentUser;
-        if (currentUser) {
-          const userID = generateUserID();
-          const newUserData = {
-            email: currentUser.email || '',
-            displayName: currentUser.displayName || 'Usuário',
-            photoURL: currentUser.photoURL || `https://api.dicebear.com/6.x/initials/svg?seed=${currentUser.email}`,
-            isAdmin: isAdminUID(userId),
-            createdAt: new Date(),
-            userID: userID,
-            friends: [],
-            tags: [],
-            statusMode: 'online'
-          };
-          await setDoc(doc(db, 'users', userId), newUserData);
-          setUser({ uid: userId, ...newUserData });
-        }
-      }
-    } catch (error) {
-      console.error('Erro ao carregar dados do usuário:', error);
-    }
-    setLoading(false);
-  };
-  
-  const loadChats = async () => {
-    if (!user) return;
-  
-    const userDoc = await getDoc(doc(db, 'users', user.uid));
-    const friendsUIDs = userDoc.data()?.friends || [];
-    const friendsPromises = friendsUIDs.map((uid: string) => getDoc(doc(db, 'users', uid)));
-    const friendDocs = await Promise.all(friendsPromises);
-    const friendsData = friendDocs.filter(doc => doc.exists()).map(doc => ({ uid: doc.id, ...doc.data() } as Friend));
-    setFriends(friendsData);
+      };
     
-    const q = query(collection(db, 'chats'), where('members', 'array-contains', user.uid));
-  
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const chatPromises = snapshot.docs.map(async (docSnap) => {
-        const chatData = { id: docSnap.id, ...docSnap.data() } as Chat;
-        let displayName = 'Grupo';
-        let displayPhoto = `https://api.dicebear.com/6.x/identicon/svg?seed=${chatData.id}`;
-  
-        if (!chatData.isGroup) {
-          const otherUserId = chatData.members.find(uid => uid !== user.uid);
-          displayName = "Chat Deletado";
-          displayPhoto = `https://api.dicebear.com/6.x/initials/svg?seed=?`;
+      const playNotificationSound = () => {
+        if (soundEnabled) {
+          const audio = new Audio('/sounds/notification.mp3');
+          audio.play().catch(console.error);
+        }
+      };
+    
+      const showSystemNotification = (title: string, options: NotificationOptions) => {
+        if (notificationsEnabled && 'serviceWorker' in navigator) {
+          navigator.serviceWorker.ready.then(registration => {
+            registration.showNotification(title, options);
+          });
+        }
+      };
 
-          if (otherUserId) {
-            try {
-              let friend = friendsData.find(f => f.uid === otherUserId);
-              if (!friend) {
-                const otherUserDoc = await getDoc(doc(db, 'users', otherUserId));
-                if (otherUserDoc.exists()) friend = { uid: otherUserDoc.id, ...otherUserDoc.data() } as Friend;
+      const loadUserData = async (userId: string) => {
+        try {
+          const userDoc = await getDoc(doc(db, 'users', userId));
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            let userID = userData.userID;
+            if (!userID) {
+              userID = generateUserID();
+              await updateDoc(doc(db, 'users', userId), { userID });
+            }
+            setUser({ uid: userId, ...userData, userID, friends: userData.friends || [] } as User);
+            setNewDisplayName(userData.displayName);
+            setNewPhotoURL(userData.photoURL);
+            setStatusMode(userData.statusMode || 'online');
+          } else {
+            const currentUser = auth.currentUser;
+            if (currentUser) {
+              const userID = generateUserID();
+              const newUserData = {
+                email: currentUser.email || '',
+                displayName: currentUser.displayName || 'Usuário',
+                photoURL: currentUser.photoURL || `https://api.dicebear.com/6.x/initials/svg?seed=${currentUser.email}`,
+                isAdmin: isAdminUID(userId),
+                createdAt: new Date(),
+                userID: userID,
+                friends: [],
+                tags: [],
+                statusMode: 'online'
+              };
+              await setDoc(doc(db, 'users', userId), newUserData);
+              setUser({ uid: userId, ...newUserData });
+            }
+          }
+        } catch (error) {
+          console.error('Erro ao carregar dados do usuário:', error);
+        }
+        setLoading(false);
+      };
+
+      const loadChats = async () => {
+        if (!user) return;
+      
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        const friendsUIDs = userDoc.data()?.friends || [];
+        const friendsPromises = friendsUIDs.map((uid: string) => getDoc(doc(db, 'users', uid)));
+        const friendDocs = await Promise.all(friendsPromises);
+        const friendsData = friendDocs.filter(doc => doc.exists()).map(doc => ({ uid: doc.id, ...doc.data() } as Friend));
+        setFriends(friendsData);
+        
+        const q = query(collection(db, 'chats'), where('members', 'array-contains', user.uid));
+      
+        const unsubscribe = onSnapshot(q, async (snapshot) => {
+          const chatPromises = snapshot.docs.map(async (docSnap) => {
+            const chatData = { id: docSnap.id, ...docSnap.data() } as Chat;
+            let displayName = 'Grupo';
+            let displayPhoto = `https://api.dicebear.com/6.x/identicon/svg?seed=${chatData.id}`;
+      
+            if (!chatData.isGroup) {
+              const otherUserId = chatData.members.find(uid => uid !== user.uid);
+              displayName = "Chat Deletado";
+              displayPhoto = `https://api.dicebear.com/6.x/initials/svg?seed=?`;
+    
+              if (otherUserId) {
+                try {
+                  let friend = friendsData.find(f => f.uid === otherUserId);
+                  if (!friend) {
+                    const otherUserDoc = await getDoc(doc(db, 'users', otherUserId));
+                    if (otherUserDoc.exists()) friend = { uid: otherUserDoc.id, ...otherUserDoc.data() } as Friend;
+                  }
+                  if (friend) {
+                    displayName = friend.displayName;
+                    displayPhoto = friend.photoURL;
+                  }
+                } catch (e) { console.error("Erro ao buscar dados do amigo:", e); }
               }
-              if (friend) {
-                displayName = friend.displayName;
-                displayPhoto = friend.photoURL;
-              }
-            } catch (e) { console.error("Erro ao buscar dados do amigo:", e); }
+            } else {
+              displayName = chatData.name || 'Grupo sem nome';
+              if (chatData.photoURL) displayPhoto = chatData.photoURL;
+            }
+      
+            return { ...chatData, display_name: displayName, display_photo: displayPhoto };
+          });
+      
+          const resolvedChats = await Promise.all(chatPromises);
+          const sorted = sortChatsByActivity(resolvedChats);
+          setSortedChats(sorted);
+        });
+      
+        return unsubscribe;
+      };
+
+      const loadMessages = () => {
+        if (!selectedChat || !user) return undefined;
+        const chatId = selectedChat.id;
+        const q = query(collection(db, 'messages'), where('chatId', '==', chatId), orderBy('timestamp', 'asc'));
+        
+        return onSnapshot(q, (snapshot) => {
+          setMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Message)));
+          scrollToBottom();
+        }, (error) => console.error("Erro no listener de mensagens: ", error));
+      };
+
+      const selectChat = (chat: DisplayChat) => {
+        if (!user) return;
+        setSelectedChat(chat);
+        if (unreadCounts[chat.id] > 0) {
+          setUnreadCounts(prev => ({ ...prev, [chat.id]: 0 }));
+        }
+        if (!chat.isGroup) {
+          const friendUID = chat.members.find(uid => uid !== user.uid);
+          if(friendUID){
+            const friendData = friends.find(f => f.uid === friendUID);
+            setSelectedFriend(friendData || null);
           }
         } else {
-          displayName = chatData.name || 'Grupo sem nome';
-          if (chatData.photoURL) displayPhoto = chatData.photoURL;
+          setSelectedFriend(null);
         }
-  
-        return { ...chatData, display_name: displayName, display_photo: displayPhoto };
-      });
-  
-      const resolvedChats = await Promise.all(chatPromises);
-      const sorted = sortChatsByActivity(resolvedChats);
-      setSortedChats(sorted);
-    });
-  
-    return unsubscribe;
-  };
-  
-  const loadMessages = () => {
-    if (!selectedChat || !user) return undefined;
-    const chatId = selectedChat.id;
-    const q = query(collection(db, 'messages'), where('chatId', '==', chatId), orderBy('timestamp', 'asc'));
-    
-    return onSnapshot(q, (snapshot) => {
-      setMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Message)));
-      scrollToBottom();
-    }, (error) => console.error("Erro no listener de mensagens: ", error));
-  };
-  
-  const selectChat = (chat: DisplayChat) => {
-    if (!user) return;
-    setSelectedChat(chat);
-    if (unreadCounts[chat.id] > 0) {
-      setUnreadCounts(prev => ({ ...prev, [chat.id]: 0 }));
-    }
-    if (!chat.isGroup) {
-      const friendUID = chat.members.find(uid => uid !== user.uid);
-      if(friendUID){
-        const friendData = friends.find(f => f.uid === friendUID);
-        setSelectedFriend(friendData || null);
-      }
-    } else {
-      setSelectedFriend(null);
-    }
-  };
+      };
 
-  // ... (outras funções auxiliares)
-  const sendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newMessage.trim() || !user || !selectedChat) return;
-  
-    const isImageUrl = /\.(jpeg|jpg|gif|png|webp|svg)$/i.test(newMessage);
-    const chatId = selectedChat.id;
-  
-    try {
-      const messageText = selectedChat.isGroup ? newMessage : encryptMessage(newMessage, user.uid, selectedFriend?.uid || '');
-      await addDoc(collection(db, 'messages'), { text: messageText, userId: user.uid, userName: user.displayName, userPhoto: user.photoURL, timestamp: serverTimestamp(), isImage: isImageUrl, chatId: chatId, readBy: [user.uid], reactions: {} });
-      await updateDoc(doc(db, 'chats', chatId), { lastMessage: { text: isImageUrl ? "📷 Imagem" : newMessage, timestamp: serverTimestamp(), sender: user.uid } });
-      setNewMessage('');
-    } catch (error) { console.error('Erro ao enviar mensagem:', error); }
-  };
+      const sendMessage = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!newMessage.trim() || !user || !selectedChat) return;
+      
+        const isImageUrl = /\.(jpeg|jpg|gif|png|webp|svg)$/i.test(newMessage);
+        const chatId = selectedChat.id;
+      
+        try {
+          const messageText = selectedChat.isGroup ? newMessage : encryptMessage(newMessage, user.uid, selectedFriend?.uid || '');
+          await addDoc(collection(db, 'messages'), { text: messageText, userId: user.uid, userName: user.displayName, userPhoto: user.photoURL, timestamp: serverTimestamp(), isImage: isImageUrl, chatId: chatId, readBy: [user.uid], reactions: {} });
+          await updateDoc(doc(db, 'chats', chatId), { lastMessage: { text: isImageUrl ? "📷 Imagem" : newMessage, timestamp: serverTimestamp(), sender: user.uid } });
+          setNewMessage('');
+        } catch (error) { console.error('Erro ao enviar mensagem:', error); }
+      };
 
   if (loading) {
     return (
@@ -368,6 +396,24 @@ export default function ChatPage() {
       </div>
     );
   }
+
+  const ChatList = () => (
+    <div className="flex-1 overflow-y-auto scrollbar-hide">
+      <div className="p-2">
+        <h3 className="text-gray-400 text-sm font-medium mb-2 px-2">Conversas ({sortedChats.length})</h3>
+        {sortedChats.map((chat) => (
+          <div key={chat.id} className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors group ${selectedChat?.id === chat.id ? 'bg-gray-700' : 'hover:bg-gray-800'}`} onClick={() => selectChat(chat)}>
+            <Avatar className="h-10 w-10"><AvatarImage src={chat.display_photo} /><AvatarFallback className="bg-gray-700 text-white">{chat.display_name?.charAt(0).toUpperCase() || '?'}</AvatarFallback></Avatar>
+            <div className="flex-1 min-w-0">
+              <h4 className="text-white font-medium truncate">{chat.display_name}</h4>
+              {chat.lastMessage && <p className="text-gray-400 text-xs truncate">{chat.lastMessage.text}</p>}
+            </div>
+            {unreadCounts[chat.id] > 0 && <Badge variant="destructive" className="flex-shrink-0">{unreadCounts[chat.id] > 99 ? '99+' : unreadCounts[chat.id]}</Badge>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <div className="h-screen [-webkit-app-region:no-drag] flex bg-black text-white overflow-hidden">
@@ -394,15 +440,15 @@ export default function ChatPage() {
             <Button variant="ghost" size="sm" onClick={() => setEditingProfile(!editingProfile)} className="text-gray-400 hover:text-white hover:bg-gray-800"><Settings className="h-4 w-4" /></Button>
             <Button variant="ghost" size="sm" onClick={() => setSoundEnabled(!soundEnabled)} className="text-gray-400 hover:text-white hover:bg-gray-800">{soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}</Button>
             {user?.isAdmin && (<Button variant="ghost" size="sm" onClick={() => router.push('/admin')} className="text-gray-400 hover:text-white hover:bg-gray-800"><Users className="h-4 w-4" /></Button>)}
-            <Button variant="ghost" size="sm" onClick={handleLogout} className="text-gray-400 hover:text-white hover:bg-gray-800"><LogOut className="h-4 w-4" /></Button>
+            <Button variant="ghost" size="sm" onClick={() => {}} className="text-gray-400 hover:text-white hover:bg-gray-800"><LogOut className="h-4 w-4" /></Button>
           </div>
         </div>
 
         {/* Add Friend & Group */}
         <div className="p-4 border-b border-gray-700">
           <div className="flex gap-2 mb-2">
-            <Input value={newFriendID} onChange={(e) => setNewFriendID(e.target.value)} placeholder="ID do amigo (ex: del#1234)" className="bg-gray-700 border-gray-600 text-white" onKeyPress={(e) => { if (e.key === 'Enter') addFriend(); }}/>
-            <Button onClick={addFriend} disabled={addingFriend} className="bg-white text-black hover:bg-gray-200" title="Adicionar amigo">
+            <Input value={newFriendID} onChange={(e) => setNewFriendID(e.target.value)} placeholder="ID do amigo (ex: del#1234)" className="bg-gray-700 border-gray-600 text-white" onKeyPress={(e) => { if (e.key === 'Enter') {} }}/>
+            <Button onClick={() => {}} disabled={addingFriend} className="bg-white text-black hover:bg-gray-200" title="Adicionar amigo">
               {addingFriend ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-black"></div> : <UserPlus className="h-4 w-4" />}
             </Button>
           </div>
@@ -412,25 +458,7 @@ export default function ChatPage() {
           </Button>
         </div>
         
-        {/* Chat List */}
-        <div className="flex-1 overflow-y-auto scrollbar-hide">
-          <div className="p-2">
-            <h3 className="text-gray-400 text-sm font-medium mb-2 px-2">Conversas ({sortedChats.length})</h3>
-            {sortedChats.map((chat) => (
-              <div key={chat.id} className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors group ${selectedChat?.id === chat.id ? 'bg-gray-700' : 'hover:bg-gray-800'}`} onClick={() => selectChat(chat)}>
-                <Avatar className="h-10 w-10">
-                  <AvatarImage src={chat.display_photo} />
-                  <AvatarFallback className="bg-gray-700 text-white">{chat.display_name?.charAt(0).toUpperCase() || '?'}</AvatarFallback>
-                </Avatar>
-                <div className="flex-1 min-w-0">
-                  <h4 className="text-white font-medium truncate">{chat.display_name}</h4>
-                  {chat.lastMessage && <p className="text-gray-400 text-xs truncate">{chat.lastMessage.text}</p>}
-                </div>
-                {unreadCounts[chat.id] > 0 && <Badge variant="destructive" className="flex-shrink-0">{unreadCounts[chat.id] > 99 ? '99+' : unreadCounts[chat.id]}</Badge>}
-              </div>
-            ))}
-          </div>
-        </div>
+        <ChatList />
       </div>
       
       {/* Main Chat Area */}
@@ -440,14 +468,13 @@ export default function ChatPage() {
             <div className="bg-gray-900 border-b border-gray-700 p-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <Avatar className="h-10 w-10"><AvatarImage src={selectedChat.display_photo} /><AvatarFallback>{selectedChat.display_name?.charAt(0)}</AvatarFallback></Avatar>
-                <div>
-                  <h2 className="text-white font-semibold">{selectedChat.display_name}</h2>
-                </div>
+                <div><h2 className="text-white font-semibold">{selectedChat.display_name}</h2></div>
               </div>
               <Button variant="ghost" size="sm" onClick={() => setShowSearch(!showSearch)}><Search className="h-4 w-4" /></Button>
             </div>
+            {showSearch && <div className="p-2 border-b border-gray-700"><Input placeholder="Buscar na conversa..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} /></div>}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-800 scrollbar-hide">
-              {messages.map((message) => (
+              {filteredMessages.map((message) => (
                 <div key={message.id} className={`flex ${message.userId === user?.uid ? 'justify-end' : 'justify-start'}`}>
                   <div className={`max-w-[70%] rounded-lg p-3 relative group ${message.userId === user?.uid ? 'bg-white text-black' : 'bg-gray-700 text-white'}`}>
                     {message.userId !== user?.uid && <div className="flex items-center gap-2 mb-2"><Avatar className="h-6 w-6"><AvatarImage src={message.userPhoto} /></Avatar><span className="text-sm text-gray-300">{message.userName}</span></div>}
@@ -476,7 +503,7 @@ export default function ChatPage() {
         )}
       </div>
 
-      {showGroupModal && <GroupChatModal friends={friends} onClose={() => setShowGroupModal(false)} onCreateGroup={createGroupChat} />}
+      {showGroupModal && <GroupChatModal friends={friends} onClose={() => setShowGroupModal(false)} onCreateGroup={() => {}} />}
     </div>
   );
 }
