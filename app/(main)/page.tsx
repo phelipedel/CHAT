@@ -417,7 +417,8 @@ export default function ChatPage() {
     if (!selectedChat || !user) return undefined;
   
     const chatId = selectedChat.id;
-    const otherMemberId = selectedChat.members.find(memberId => memberId !== user.uid) || '';
+    // CORREÇÃO: Garante que os membros do chat sejam usados para a chave.
+    const [member1, member2] = selectedChat.members;
   
     const q = query(
       collection(db, 'messages'), 
@@ -432,7 +433,7 @@ export default function ChatPage() {
         const data = doc.data();
         const message = {
           id: doc.id,
-          text: selectedChat.isGroup ? data.text : decryptMessage(data.text, data.userId, user.uid),
+          text: selectedChat.isGroup ? data.text : decryptMessage(data.text, member1, member2),
           userId: data.userId,
           userName: data.userName,
           userPhoto: data.userPhoto,
@@ -636,8 +637,8 @@ export default function ChatPage() {
       await updateDoc(doc(db, 'users', friendUID), {
         friends: arrayUnion(user.uid)
       });
-
-      // Recarrega a lista de chats para refletir a nova amizade
+      
+      // Recarrega os chats para incluir o novo amigo
       loadChats();
 
       setNewFriendID('');
