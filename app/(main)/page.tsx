@@ -2,14 +2,14 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { 
-  collection, 
-  addDoc, 
-  query, 
-  orderBy, 
-  onSnapshot, 
-  doc, 
-  updateDoc, 
+import {
+  collection,
+  addDoc,
+  query,
+  orderBy,
+  onSnapshot,
+  doc,
+  updateDoc,
   getDoc,
   serverTimestamp,
   where,
@@ -37,11 +37,11 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { 
-  Send, 
-  LogOut, 
-  Settings, 
-  Shield, 
+import {
+  Send,
+  LogOut,
+  Settings,
+  Shield,
   Users,
   Image as ImageIcon,
   Edit2,
@@ -139,7 +139,7 @@ export default function ChatPage() {
   const [showGroupModal, setShowGroupModal] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
-  
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const router = useRouter();
@@ -201,7 +201,7 @@ export default function ChatPage() {
     if (selectedChat && user) {
       const chatId = selectedChat.isGroup ? selectedChat.id : [user.uid, selectedFriend?.uid].sort().join('_');
       const typingRef = ref(rtdb, `/typing/${chatId}`);
-      
+
       const unsubscribe = onValue(typingRef, (snapshot) => {
         if (snapshot.exists()) {
           const typingData = snapshot.val();
@@ -211,7 +211,7 @@ export default function ChatPage() {
           setIsFriendTyping(false);
         }
       });
-      
+
       return () => unsubscribe();
     }
   }, [selectedChat, user, selectedFriend]);
@@ -221,7 +221,7 @@ export default function ChatPage() {
     if (searchQuery.trim() === '') {
       setFilteredMessages(messages);
     } else {
-      const filtered = messages.filter(msg => 
+      const filtered = messages.filter(msg =>
         msg.text.toLowerCase().includes(searchQuery.toLowerCase())
       );
       setFilteredMessages(filtered);
@@ -231,8 +231,8 @@ export default function ChatPage() {
   // Mark messages as read
   useEffect(() => {
     if (messages.length > 0 && user && selectedChat) {
-      const unreadMessages = messages.filter(msg => 
-        msg.userId !== user.uid && 
+      const unreadMessages = messages.filter(msg =>
+        msg.userId !== user.uid &&
         (!msg.readBy || !msg.readBy.includes(user.uid))
       );
 
@@ -275,7 +275,7 @@ export default function ChatPage() {
     try {
       const userDoc = await getDoc(doc(db, 'users', userId));
       const isUserAdmin = isAdminUID(userId);
-      
+
       if (userDoc.exists()) {
         const userData = userDoc.data();
         let userID = userData.userID;
@@ -283,7 +283,7 @@ export default function ChatPage() {
           userID = generateUserID();
           await updateDoc(doc(db, 'users', userId), { userID });
         }
-        
+
         setUser({
           uid: userId,
           email: userData.email,
@@ -313,9 +313,9 @@ export default function ChatPage() {
             tags: [],
             statusMode: 'online'
           };
-          
+
           await setDoc(doc(db, 'users', userId), newUserData);
-          
+
           setUser({
             uid: userId,
             ...newUserData,
@@ -341,7 +341,7 @@ export default function ChatPage() {
       const userDoc = await getDoc(doc(db, 'users', user.uid));
       const userData = userDoc.data();
       const userFriends = userData?.friends || [];
-      
+
       // Carregar dados dos amigos
       const friendsData: Friend[] = [];
       for (const friendUID of userFriends) {
@@ -359,7 +359,30 @@ export default function ChatPage() {
         }
       }
       setFriends(friendsData);
-      
+
+      // Início da correção: Garante que todos os amigos tenham um chat criado.
+      for (const friend of friendsData) {
+        const sortedMembers = [user.uid, friend.uid].sort();
+        // Usamos um ID de chat previsível para evitar duplicatas
+        const chatId = sortedMembers.join('_');
+        const chatDocRef = doc(db, 'chats', chatId);
+        const chatDoc = await getDoc(chatDocRef);
+
+        if (!chatDoc.exists()) {
+          // O chat não existe, então vamos criá-lo
+          await setDoc(chatDocRef, {
+            members: sortedMembers,
+            isGroup: false,
+            createdBy: user.uid,
+            lastMessage: null,
+            // Adicionando photoURL e nome do amigo para melhorar a exibição
+            name: friend.displayName,
+            photoURL: friend.photoURL
+          });
+        }
+      }
+      // Fim da correção
+
       // Configurar listeners de status para amigos
       const statusUnsubscribes: Function[] = [];
       friendsData.forEach(friend => {
@@ -367,8 +390,8 @@ export default function ChatPage() {
         const unsubscribe = onValue(statusRef, (snapshot) => {
           if (snapshot.exists()) {
             const status = snapshot.val();
-            setFriends(prev => prev.map(f => 
-              f.uid === friend.uid 
+            setFriends(prev => prev.map(f =>
+              f.uid === friend.uid
                 ? { ...f, status: status.state, lastSeen: status.last_changed }
                 : f
             ));
@@ -376,13 +399,13 @@ export default function ChatPage() {
         });
         statusUnsubscribes.push(unsubscribe);
       });
-      
+
       // Carregar chats
       const q = query(
         collection(db, 'chats'),
         where('members', 'array-contains', user.uid)
       );
-      
+
       const unsubscribe = onSnapshot(q, (snapshot) => {
         const chatsData: Chat[] = [];
         snapshot.forEach((doc) => {
@@ -392,7 +415,7 @@ export default function ChatPage() {
           } as Chat);
         });
         setChats(chatsData);
-        
+
         // Se não há chat selecionado e há chats disponíveis, não selecionar automaticamente
         // Deixar o usuário escolher
       });
@@ -411,15 +434,15 @@ export default function ChatPage() {
 
     const chatId = selectedChat.id;
     const q = query(
-      collection(db, 'messages'), 
+      collection(db, 'messages'),
       where('chatId', '==', chatId),
       orderBy('timestamp', 'asc')
     );
-    
+
     return onSnapshot(q, (snapshot) => {
       const loadedMessages: Message[] = [];
       const newMessages: Message[] = [];
-      
+
       // Processar todas as mensagens do snapshot
       snapshot.forEach((doc) => {
         const data = doc.data();
@@ -437,7 +460,7 @@ export default function ChatPage() {
         };
         loadedMessages.push(message);
       });
-      
+
       // Identificar novas mensagens para notificações
       snapshot.docChanges().forEach((change) => {
         if (change.type === 'added') {
@@ -453,12 +476,12 @@ export default function ChatPage() {
           }
         }
       });
-      
+
       // Ordenar mensagens por timestamp
       loadedMessages.sort((a, b) => {
         return (a.timestamp?.toMillis() || 0) - (b.timestamp?.toMillis() || 0);
       });
-      
+
       setMessages(loadedMessages);
       scrollToBottom();
     }, (error) => {
@@ -494,7 +517,7 @@ export default function ChatPage() {
     e.preventDefault();
     if (!newMessage.trim() || !user || !selectedChat) return;
 
-    const isImageUrl = newMessage.match(/\.(jpeg|jpg|gif|png|webp|svg)$/i) || 
+    const isImageUrl = newMessage.match(/\.(jpeg|jpg|gif|png|webp|svg)$/i) ||
                        newMessage.includes('images.unsplash.com') ||
                        newMessage.includes('via.placeholder.com');
 
@@ -502,7 +525,7 @@ export default function ChatPage() {
 
     try {
       const messageText = selectedChat.isGroup ? newMessage : encryptMessage(newMessage, user.uid, selectedFriend?.uid || '');
-      
+
       await addDoc(collection(db, 'messages'), {
         text: messageText,
         userId: user.uid,
@@ -525,7 +548,7 @@ export default function ChatPage() {
       });
 
       setNewMessage('');
-      
+
       // Clear typing indicator
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
@@ -543,7 +566,7 @@ export default function ChatPage() {
     try {
       const messageRef = doc(db, 'messages', message.id);
       const currentReactions = message.reactions || {};
-      const userReactions = Object.keys(currentReactions).filter(e => 
+      const userReactions = Object.keys(currentReactions).filter(e =>
         currentReactions[e].includes(user.uid)
       );
 
@@ -608,7 +631,7 @@ export default function ChatPage() {
     try {
       const q = query(collection(db, 'users'), where('userID', '==', newFriendID));
       const querySnapshot = await getDocs(q);
-      
+
       if (querySnapshot.empty) {
         alert('Usuário não encontrado!');
         setAddingFriend(false);
@@ -624,7 +647,7 @@ export default function ChatPage() {
         setAddingFriend(false);
         return;
       }
-      
+
       if (user.friends.includes(friendUID)) {
         alert('Este usuário já está na sua lista de amigos!');
         setAddingFriend(false);
@@ -643,17 +666,17 @@ export default function ChatPage() {
       const sortedMembers = [user.uid, friendUID].sort();
       const chatsQuery = query(collection(db, 'chats'), where('isGroup', '==', false));
       const chatsSnapshot = await getDocs(chatsQuery);
-      
+
       let existingChat = null;
       chatsSnapshot.forEach(doc => {
         const chatData = doc.data();
-        if (chatData.members.length === 2 && 
-            chatData.members.includes(user.uid) && 
+        if (chatData.members.length === 2 &&
+            chatData.members.includes(user.uid) &&
             chatData.members.includes(friendUID)) {
           existingChat = doc;
         }
       });
-      
+
       if (!existingChat) {
         await addDoc(collection(db, 'chats'), {
           members: sortedMembers,
@@ -662,7 +685,7 @@ export default function ChatPage() {
           lastMessage: null
         });
       }
-      
+
       const newFriend: Friend = {
         uid: friendUID,
         userID: friendData.userID,
@@ -671,7 +694,7 @@ export default function ChatPage() {
         tags: friendData.tags || [],
         status: 'offline',
       };
-      
+
       setFriends(prev => [...prev, newFriend]);
 
       setUser({
@@ -705,7 +728,7 @@ export default function ChatPage() {
           ...user,
           friends: user.friends.filter(f => f !== friendUID)
         });
-        
+
       } catch (error) {
         console.error('Erro ao remover amigo:', error);
       }
@@ -731,7 +754,7 @@ export default function ChatPage() {
         photoURL: newPhotoURL,
         statusMode: statusMode,
       });
-      
+
       setUser({
         ...user,
         displayName: newDisplayName,
@@ -748,7 +771,7 @@ export default function ChatPage() {
 
   const copyUserID = async () => {
     if (!user?.userID) return;
-    
+
     try {
       await navigator.clipboard.writeText(user.userID);
       setCopiedUserID(true);
@@ -848,7 +871,7 @@ export default function ChatPage() {
               </div>
             </div>
           </div>
-          
+
           <div className="p-4 border-b border-gray-700">
             <div className="mb-2">
               <p className="text-xs text-gray-400 mb-1">Adicionar amigo pelo ID:</p>
@@ -887,7 +910,7 @@ export default function ChatPage() {
               Criar Grupo
             </Button>
           </div>
-          
+
           <div className="flex-1 overflow-y-auto scrollbar-hide">
             <div className="p-2">
               <h3 className="text-gray-400 text-sm font-medium mb-2 px-2">Conversas ({chats.length})</h3>
@@ -899,34 +922,41 @@ export default function ChatPage() {
                 </div>
               ) : (
                 <div className="space-y-1">
-                  {chats.map((chat) => (
-                    <div
-                      key={chat.id}
-                      className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors group ${
-                        selectedChat?.id === chat.id 
-                          ? 'bg-gray-700' 
-                          : 'hover:bg-gray-800'
-                      }`}
-                      onClick={() => selectChat(chat)}
-                    >
-                      <Avatar className="h-10 w-10">
-                        <AvatarImage src={chat.photoURL} />
-                        <AvatarFallback className="bg-gray-700 text-white">
-                          {chat.isGroup ? chat.name?.charAt(0) : 'U'}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="flex-1 min-w-0">
-                        <h4 className="text-white font-medium truncate">
-                          {chat.isGroup ? chat.name : 'Chat Privado'}
-                        </h4>
-                        {chat.lastMessage && (
-                          <p className="text-gray-400 text-xs truncate">
-                            {chat.lastMessage.text}
-                          </p>
-                        )}
+                  {chats.map((chat) => {
+                    // Encontra o amigo correspondente ao chat 1-a-1
+                    const friendInChat = !chat.isGroup
+                      ? friends.find(f => chat.members.includes(f.uid) && f.uid !== user?.uid)
+                      : null;
+
+                    return (
+                      <div
+                        key={chat.id}
+                        className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors group ${
+                          selectedChat?.id === chat.id
+                            ? 'bg-gray-700'
+                            : 'hover:bg-gray-800'
+                        }`}
+                        onClick={() => selectChat(chat)}
+                      >
+                        <Avatar className="h-10 w-10">
+                          <AvatarImage src={chat.isGroup ? chat.photoURL : friendInChat?.photoURL} />
+                          <AvatarFallback className="bg-gray-700 text-white">
+                            {chat.isGroup ? chat.name?.charAt(0) : friendInChat?.displayName?.charAt(0) || 'U'}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="flex-1 min-w-0">
+                          <h4 className="text-white font-medium truncate">
+                            {chat.isGroup ? chat.name : friendInChat?.displayName || 'Chat Privado'}
+                          </h4>
+                          {chat.lastMessage && (
+                            <p className="text-gray-400 text-xs truncate">
+                              {chat.lastMessage.text}
+                            </p>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -976,7 +1006,7 @@ export default function ChatPage() {
               </div>
             </div>
           </div>
-          
+
           <div className="flex gap-2">
             <Button
               variant="ghost"
@@ -1070,19 +1100,19 @@ export default function ChatPage() {
                 className="bg-gray-700 border-gray-600 text-white"
               />
               <div className="flex gap-2">
-                <Button 
-                  size="sm" 
-                  onClick={updateProfile} 
+                <Button
+                  size="sm"
+                  onClick={updateProfile}
                   disabled={savingProfile}
                   className="bg-white text-black hover:bg-gray-200"
                 >
                   <Save className="h-4 w-4 mr-1" />
                   {savingProfile ? 'Salvando...' : 'Salvar'}
                 </Button>
-                <Button 
-                  size="sm" 
-                  variant="outline" 
-                  onClick={() => setEditingProfile(false)} 
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setEditingProfile(false)}
                   disabled={savingProfile}
                   className="border-gray-600 text-white hover:bg-gray-800"
                 >
@@ -1132,7 +1162,7 @@ export default function ChatPage() {
             Criar Grupo
           </Button>
         </div>
-        
+
         <div className="flex-1 overflow-y-auto scrollbar-hide">
           <div className="p-2">
             <h3 className="text-gray-400 text-sm font-medium mb-2 px-2">Conversas ({chats.length})</h3>
@@ -1144,34 +1174,41 @@ export default function ChatPage() {
               </div>
             ) : (
               <div className="space-y-1">
-                {chats.map((chat) => (
-                  <div
-                    key={chat.id}
-                    className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors group ${
-                      selectedChat?.id === chat.id 
-                        ? 'bg-gray-700' 
-                        : 'hover:bg-gray-800'
-                    }`}
-                    onClick={() => selectChat(chat)}
-                  >
-                    <Avatar className="h-10 w-10">
-                      <AvatarImage src={chat.photoURL} />
-                      <AvatarFallback className="bg-gray-700 text-white">
-                        {chat.isGroup ? chat.name?.charAt(0) : 'U'}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <h4 className="text-white font-medium truncate">
-                        {chat.isGroup ? chat.name : 'Chat Privado'}
-                      </h4>
-                      {chat.lastMessage && (
-                        <p className="text-gray-400 text-xs truncate">
-                          {chat.lastMessage.text}
-                        </p>
-                      )}
+                {chats.map((chat) => {
+                  // Encontra o amigo correspondente ao chat 1-a-1
+                  const friendInChat = !chat.isGroup
+                    ? friends.find(f => chat.members.includes(f.uid) && f.uid !== user?.uid)
+                    : null;
+
+                  return (
+                    <div
+                      key={chat.id}
+                      className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors group ${
+                        selectedChat?.id === chat.id
+                          ? 'bg-gray-700'
+                          : 'hover:bg-gray-800'
+                      }`}
+                      onClick={() => selectChat(chat)}
+                    >
+                      <Avatar className="h-10 w-10">
+                        <AvatarImage src={chat.isGroup ? chat.photoURL : friendInChat?.photoURL} />
+                        <AvatarFallback className="bg-gray-700 text-white">
+                          {chat.isGroup ? chat.name?.charAt(0) : friendInChat?.displayName?.charAt(0) || 'U'}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 min-w-0">
+                        <h4 className="text-white font-medium truncate">
+                          {chat.isGroup ? chat.name : friendInChat?.displayName || 'Chat Privado'}
+                        </h4>
+                        {chat.lastMessage && (
+                          <p className="text-gray-400 text-xs truncate">
+                            {chat.lastMessage.text}
+                          </p>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1199,11 +1236,11 @@ export default function ChatPage() {
                         <>
                           <p className="text-gray-400 text-sm">{selectedFriend.userID}</p>
                           {selectedFriend.status && selectedFriend.status !== 'hidden' && (
-                            <Badge 
-                              variant="secondary" 
+                            <Badge
+                              variant="secondary"
                               className={`text-xs ${
-                                selectedFriend.status === 'online' 
-                                  ? 'bg-green-600 text-white' 
+                                selectedFriend.status === 'online'
+                                  ? 'bg-green-600 text-white'
                                   : selectedFriend.status === 'away'
                                   ? 'bg-yellow-600 text-white'
                                   : 'bg-gray-600 text-white'
@@ -1212,7 +1249,7 @@ export default function ChatPage() {
                               {selectedFriend.status === 'online' && <Circle className="h-2 w-2 mr-1 fill-current" />}
                               {selectedFriend.status === 'away' && <Clock className="h-2 w-2 mr-1" />}
                               {selectedFriend.status === 'offline' && <Circle className="h-2 w-2 mr-1 fill-current" />}
-                              {selectedFriend.status === 'online' ? 'Online' : 
+                              {selectedFriend.status === 'online' ? 'Online' :
                                selectedFriend.status === 'away' ? 'Ausente' : 'Offline'}
                             </Badge>
                           )}
@@ -1269,7 +1306,7 @@ export default function ChatPage() {
                         <span className="text-sm text-gray-300">{message.userName}</span>
                       </div>
                     )}
-                    
+
                     {message.isImage ? (
                       <img
                         src={message.text}
@@ -1288,12 +1325,12 @@ export default function ChatPage() {
                       <p className="break-words">{message.text}</p>
                     )}
 
-                    <ReactionPills 
-                      reactions={message.reactions || {}} 
+                    <ReactionPills
+                      reactions={message.reactions || {}}
                       onReactionClick={(emoji) => handleReaction(message, emoji)}
                       currentUserId={user?.uid || ''}
                     />
-                    
+
                     <div className="flex items-center justify-between mt-1">
                       <p className={`text-xs ${
                         message.userId === user?.uid ? 'text-gray-600' : 'text-gray-400'
@@ -1301,21 +1338,21 @@ export default function ChatPage() {
                         {message.timestamp?.toDate?.().toLocaleTimeString() || 'Enviando...'}
                       </p>
                       {message.userId === user?.uid && (
-                        <MessageStatusIcon 
-                          message={message} 
-                          currentUser={user} 
+                        <MessageStatusIcon
+                          message={message}
+                          currentUser={user}
                           selectedFriend={selectedFriend}
                         />
                       )}
                     </div>
 
-                    <ReactionPopover 
+                    <ReactionPopover
                       onReactionSelect={(emoji) => handleReaction(message, emoji)}
                     />
                   </div>
                 </div>
               ))}
-              
+
               {isFriendTyping && (
                 <div className="flex justify-start">
                   <div className="bg-gray-700 text-white rounded-lg p-3 max-w-[70%]">
@@ -1330,7 +1367,7 @@ export default function ChatPage() {
                   </div>
                 </div>
               )}
-              
+
               <div ref={messagesEndRef} />
             </div>
 
