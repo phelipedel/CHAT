@@ -350,7 +350,17 @@ export default function ChatPage() {
         const q = query(collection(db, 'messages'), where('chatId', '==', chatId), orderBy('timestamp', 'asc'));
         
         return onSnapshot(q, (snapshot) => {
-          setMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Message)));
+          const loadedMessages: Message[] = [];
+          snapshot.forEach((doc) => {
+            const data = doc.data();
+            const message = {
+              id: doc.id,
+              ...data,
+              text: selectedChat.isGroup ? data.text : decryptMessage(data.text, data.userId, user.uid === data.userId ? selectedFriend?.uid || '' : user.uid),
+            } as Message;
+            loadedMessages.push(message);
+          });
+          setMessages(loadedMessages);
           scrollToBottom();
         }, (error) => console.error("Erro no listener de mensagens: ", error));
       };
@@ -508,6 +518,34 @@ export default function ChatPage() {
         setCopiedUserID(true);
         setTimeout(() => setCopiedUserID(false), 2000);
       };
+  
+      const handleTyping = () => {
+        if (!selectedChat || !user || !selectedFriend) return;
+      
+        const chatId = selectedChat.id;
+        const typingRef = ref(rtdb, `/typing/${chatId}/${user.uid}`);
+      
+        if (typingTimeoutRef.current) {
+          clearTimeout(typingTimeoutRef.current);
+        }
+      
+        set(typingRef, true);
+      
+        typingTimeoutRef.current = setTimeout(() => {
+          remove(typingRef);
+        }, 2000);
+      };
+
+  if (loading) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-black">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto mb-4"></div>
+          <p className="text-gray-400">Carregando chat...</p>
+        </div>
+      </div>
+    );
+  }
 
   const ChatList = () => (
     <div className="flex-1 overflow-y-auto scrollbar-hide">
@@ -560,17 +598,6 @@ export default function ChatPage() {
     </div>
   );
   
-  if (loading) {
-    return (
-      <div className="h-screen flex items-center justify-center bg-black">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto mb-4"></div>
-          <p className="text-gray-400">Carregando chat...</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="h-screen [-webkit-app-region:no-drag] flex bg-black text-white overflow-hidden">
       <MobileFriendsDrawer friendsCount={sortedChats.length}>
@@ -667,7 +694,17 @@ export default function ChatPage() {
             <div className="bg-gray-900 border-b border-gray-700 p-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <Avatar className="h-10 w-10"><AvatarImage src={selectedChat.display_photo} /><AvatarFallback>{selectedChat.display_name?.charAt(0)}</AvatarFallback></Avatar>
-                <div><h2 className="text-white font-semibold">{selectedChat.display_name}</h2></div>
+                <div>
+                  <h2 className="text-white font-semibold">{selectedChat.display_name}</h2>
+                  {!selectedChat.isGroup && selectedFriend && (
+                    <div className="flex items-center gap-2">
+                      <p className="text-gray-400 text-sm">{selectedFriend.userID}</p>
+                      {selectedFriend.status && selectedFriend.status !== 'hidden' && (
+                        <Badge variant="secondary" className={`text-xs ${selectedFriend.status === 'online' ? 'bg-green-600' : 'bg-gray-600'}`}>{selectedFriend.status}</Badge>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
               <Button variant="ghost" size="sm" onClick={() => setShowSearch(!showSearch)}><Search className="h-4 w-4" /></Button>
             </div>
@@ -675,7 +712,11 @@ export default function ChatPage() {
             <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-800 scrollbar-hide">
               {filteredMessages.map((message) => (
                 <div key={message.id} className={`flex ${message.userId === user?.uid ? 'justify-end' : 'justify-start'}`}>
-                  {/* ... Message rendering ... */}
+                  <div className={`max-w-[70%] rounded-lg p-3 relative group ${message.userId === user?.uid ? 'bg-white text-black' : 'bg-gray-700 text-white'}`}>
+                    {message.userId !== user?.uid && <div className="flex items-center gap-2 mb-2"><Avatar className="h-6 w-6"><AvatarImage src={message.userPhoto} /></Avatar><span className="text-sm text-gray-300">{message.userName}</span></div>}
+                    {message.isImage ? <img src={message.text} alt="Imagem" className="max-w-full h-auto rounded-lg"/> : <p className="break-words">{decryptMessage(message.text, message.userId, user?.uid || '')}</p>}
+                    <div className="mt-1 text-xs text-right">{message.timestamp?.toDate?.().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                  </div>
                 </div>
               ))}
               <div ref={messagesEndRef} />
