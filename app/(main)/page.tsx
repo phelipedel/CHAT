@@ -2,14 +2,14 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { 
-  collection, 
-  addDoc, 
-  query, 
-  orderBy, 
-  onSnapshot, 
-  doc, 
-  updateDoc, 
+import {
+  collection,
+  addDoc,
+  query,
+  orderBy,
+  onSnapshot,
+  doc,
+  updateDoc,
   getDoc,
   serverTimestamp,
   where,
@@ -37,11 +37,11 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { 
-  Send, 
-  LogOut, 
-  Settings, 
-  Shield, 
+import {
+  Send,
+  LogOut,
+  Settings,
+  Shield,
   Users,
   Image as ImageIcon,
   Save,
@@ -155,6 +155,10 @@ export default function ChatPage() {
     });
   };
 
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
   useEffect(() => {
     const currentUser = auth.currentUser;
     if (currentUser) {
@@ -162,7 +166,7 @@ export default function ChatPage() {
     } else {
       router.push('/login');
     }
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (user) {
@@ -473,7 +477,7 @@ export default function ChatPage() {
         }
         setAddingFriend(false);
       };
-
+      
       const handleLogout = async () => {
         try {
           await signOut(auth);
@@ -504,7 +508,6 @@ export default function ChatPage() {
         setCopiedUserID(true);
         setTimeout(() => setCopiedUserID(false), 2000);
       };
-    
 
   const ChatList = () => (
     <div className="flex-1 overflow-y-auto scrollbar-hide">
@@ -571,37 +574,42 @@ export default function ChatPage() {
   return (
     <div className="h-screen [-webkit-app-region:no-drag] flex bg-black text-white overflow-hidden">
       <MobileFriendsDrawer friendsCount={sortedChats.length}>
-          <div className="p-4 border-b border-gray-700">
-              <div className="flex items-center gap-3 mb-3">
-                  <Avatar className="h-12 w-12 ring-2 ring-white">
-                      <AvatarImage src={user?.photoURL} />
-                      <AvatarFallback className="bg-gray-700 text-white">{user?.displayName?.charAt(0)}</AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1 min-w-0">
-                      <h2 className="text-white font-semibold truncate">{user?.displayName}</h2>
-                      <div className="flex items-center gap-1">
-                          <Badge variant="secondary" className="text-xs bg-green-600 text-white">{user?.userID}</Badge>
-                          <Button variant="ghost" size="sm" onClick={copyUserID} className="h-6 w-6 p-0 text-gray-400 hover:text-white hover:bg-gray-700" title="Copiar ID">{copiedUserID ? <Check className="h-3 w-3 text-green-400" /> : <Copy className="h-3 w-3" />}</Button>
-                      </div>
-                  </div>
+        <div className="flex flex-col h-full overflow-hidden">
+            {/* User Info & Actions */}
+            <div className="p-4 border-b border-gray-700">
+                <div className="flex items-center gap-3 mb-3">
+                    <Avatar className="h-12 w-12 ring-2 ring-white">
+                        <AvatarImage src={user?.photoURL} />
+                        <AvatarFallback className="bg-gray-700 text-white">{user?.displayName?.charAt(0)}</AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0">
+                        <h2 className="text-white font-semibold truncate">{user?.displayName}</h2>
+                        <div className="flex items-center gap-1">
+                            <Badge variant="secondary" className="text-xs bg-green-600 text-white">{user?.userID}</Badge>
+                            <Button variant="ghost" size="sm" onClick={copyUserID} className="h-6 w-6 p-0 text-gray-400 hover:text-white hover:bg-gray-700" title="Copiar ID">{copiedUserID ? <Check className="h-3 w-3 text-green-400" /> : <Copy className="h-3 w-3" />}</Button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {/* Add Friend & Group */}
+            <div className="p-4 border-b border-gray-700">
+              <div className="flex gap-2 mb-2">
+                <Input value={newFriendID} onChange={(e) => setNewFriendID(e.target.value)} placeholder="ID do amigo (ex: del#1234)" className="bg-gray-700 border-gray-600 text-white" onKeyPress={(e) => { if (e.key === 'Enter') addFriend(); }}/>
+                <Button onClick={addFriend} disabled={addingFriend} className="bg-white text-black hover:bg-gray-200" title="Adicionar amigo">
+                  {addingFriend ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-black"></div> : <UserPlus className="h-4 w-4" />}
+                </Button>
               </div>
-          </div>
-          <div className="p-4 border-b border-gray-700">
-            <div className="flex gap-2 mb-2">
-              <Input value={newFriendID} onChange={(e) => setNewFriendID(e.target.value)} placeholder="ID do amigo (ex: del#1234)" className="bg-gray-700 border-gray-600 text-white" onKeyPress={(e) => { if (e.key === 'Enter') addFriend(); }}/>
-              <Button onClick={addFriend} disabled={addingFriend} className="bg-white text-black hover:bg-gray-200" title="Adicionar amigo">
-                {addingFriend ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-black"></div> : <UserPlus className="h-4 w-4" />}
+              <Button onClick={() => setShowGroupModal(true)} className="w-full bg-purple-600 hover:bg-purple-700 text-white" size="sm">
+                <Plus className="h-4 w-4 mr-2" />
+                Criar Grupo
               </Button>
             </div>
-            <Button onClick={() => setShowGroupModal(true)} className="w-full bg-purple-600 hover:bg-purple-700 text-white" size="sm">
-              <Plus className="h-4 w-4 mr-2" />
-              Criar Grupo
-            </Button>
-          </div>
-          <ChatList />
+            <ChatList />
+        </div>
       </MobileFriendsDrawer>
 
       <div className="hidden sm:flex w-80 bg-gray-900 border-r border-gray-700 flex-col overflow-hidden">
+        {/* User Info & Actions */}
         <div className="p-4 border-b border-gray-700">
           <div className="flex items-center gap-3 mb-3">
             <Avatar className="h-12 w-12 ring-2 ring-white">
@@ -636,6 +644,7 @@ export default function ChatPage() {
             </div>
         )}
 
+        {/* Add Friend & Group */}
         <div className="p-4 border-b border-gray-700">
           <div className="flex gap-2 mb-2">
             <Input value={newFriendID} onChange={(e) => setNewFriendID(e.target.value)} placeholder="ID do amigo (ex: del#1234)" className="bg-gray-700 border-gray-600 text-white" onKeyPress={(e) => { if (e.key === 'Enter') addFriend(); }}/>
@@ -658,9 +667,7 @@ export default function ChatPage() {
             <div className="bg-gray-900 border-b border-gray-700 p-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <Avatar className="h-10 w-10"><AvatarImage src={selectedChat.display_photo} /><AvatarFallback>{selectedChat.display_name?.charAt(0)}</AvatarFallback></Avatar>
-                <div>
-                  <h2 className="text-white font-semibold">{selectedChat.display_name}</h2>
-                </div>
+                <div><h2 className="text-white font-semibold">{selectedChat.display_name}</h2></div>
               </div>
               <Button variant="ghost" size="sm" onClick={() => setShowSearch(!showSearch)}><Search className="h-4 w-4" /></Button>
             </div>
