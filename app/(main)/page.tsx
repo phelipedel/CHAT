@@ -251,17 +251,12 @@ export default function ChatPage() {
   }, [messages, user, selectedChat]);
 
   // --- Funções ---
-  const requestNotificationPermission = async () => {
-    if ('Notification' in window) {
-      const permission = await Notification.requestPermission();
-      setNotificationsEnabled(permission === 'granted');
-    }
-  };
-
-  const playNotificationSound = async () => {
+const playNotificationSound = async () => {
     if (soundEnabled) {
-      const audioUrl = 'https://www.myinstants.com/media/sounds/notification-sound-7062.mp3'; // Exemplo de URL
+      // URL direta para o arquivo de áudio
+      const audioUrl = 'https://www.myinstants.com/media/sounds/notificacao-do-whatsapp-1.mp3';
       try {
+        // Busca o áudio como um dado para contornar políticas de segurança (CORS)
         const response = await fetch(audioUrl);
         const blob = await response.blob();
         const audio = new Audio(URL.createObjectURL(blob));
