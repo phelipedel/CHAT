@@ -294,7 +294,7 @@ export default function ChatPage() {
 
   const playNotificationSound = () => {
     if (soundEnabled) {
-      const audio = new Audio('/sounds/notification.mp3');
+      const audio = new Audio('/notifi/new-notification.mp3');
       audio.play().catch(console.error);
     }
   };
