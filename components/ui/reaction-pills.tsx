@@ -1,4 +1,4 @@
-import { Button } from './button';
+'use client';
 
 interface ReactionPillsProps {
   reactions: { [emoji: string]: string[] };
@@ -16,22 +16,24 @@ export function ReactionPills({ reactions, onReactionClick, currentUserId }: Rea
   return (
     <div className="flex flex-wrap gap-1 mt-2">
       {reactionEntries.map(([emoji, users]) => {
-        const hasUserReacted = users.includes(currentUserId);
+        const isUserReacted = users.includes(currentUserId);
         
         return (
-          <Button
+          <button
             key={emoji}
-            variant="ghost"
-            size="sm"
-            className={`h-6 px-2 py-0 text-xs rounded-full border ${
-              hasUserReacted 
-                ? 'bg-blue-600 border-blue-500 text-white' 
-                : 'bg-gray-600 border-gray-500 text-gray-300 hover:bg-gray-500'
+            onClick={(e) => {
+              e.stopPropagation();
+              onReactionClick(emoji);
+            }}
+            className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs transition-colors ${
+              isUserReacted 
+                ? 'bg-blue-600 text-white' 
+                : 'bg-gray-600 text-gray-300 hover:bg-gray-500'
             }`}
-            onClick={() => onReactionClick(emoji)}
           >
-            {emoji} {users.length}
-          </Button>
+            <span>{emoji}</span>
+            <span>{users.length}</span>
+          </button>
         );
       })}
     </div>

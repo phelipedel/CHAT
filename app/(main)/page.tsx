@@ -337,6 +337,47 @@ export default function ChatPage() {
     if (!user) return;
 
     try {
+      // Primeiro, carregar amigos do usuário
+      const userDoc = await getDoc(doc(db, 'users', user.uid));
+      const userData = userDoc.data();
+      const userFriends = userData?.friends || [];
+      
+      // Carregar dados dos amigos
+      const friendsData: Friend[] = [];
+      for (const friendUID of userFriends) {
+        const friendDoc = await getDoc(doc(db, 'users', friendUID));
+        if (friendDoc.exists()) {
+          const friendData = friendDoc.data();
+          friendsData.push({
+            uid: friendUID,
+            userID: friendData.userID,
+            displayName: friendData.displayName,
+            photoURL: friendData.photoURL,
+            tags: friendData.tags || [],
+            status: 'offline'
+          });
+        }
+      }
+      setFriends(friendsData);
+      
+      // Configurar listeners de status para amigos
+      const statusUnsubscribes: Function[] = [];
+      friendsData.forEach(friend => {
+        const statusRef = ref(rtdb, `/status/${friend.uid}`);
+        const unsubscribe = onValue(statusRef, (snapshot) => {
+          if (snapshot.exists()) {
+            const status = snapshot.val();
+            setFriends(prev => prev.map(f => 
+              f.uid === friend.uid 
+                ? { ...f, status: status.state, lastSeen: status.last_changed }
+                : f
+            ));
+          }
+        });
+        statusUnsubscribes.push(unsubscribe);
+      });
+      
+      // Carregar chats
       const q = query(
         collection(db, 'chats'),
         where('members', 'array-contains', user.uid)
@@ -351,9 +392,15 @@ export default function ChatPage() {
           } as Chat);
         });
         setChats(chatsData);
+        
+        // Se não há chat selecionado e há chats disponíveis, não selecionar automaticamente
+        // Deixar o usuário escolher
       });
 
-      return unsubscribe;
+      return () => {
+        unsubscribe();
+        statusUnsubscribes.forEach(unsub => unsub());
+      };
     } catch (error) {
       console.error('Erro ao carregar chats:', error);
     }
@@ -371,37 +418,9 @@ export default function ChatPage() {
     
     return onSnapshot(q, (snapshot) => {
       const loadedMessages: Message[] = [];
+      const newMessages: Message[] = [];
       
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === 'added') {
-          const data = change.doc.data();
-          const message = {
-            id: change.doc.id,
-            text: selectedChat.isGroup ? data.text : decryptMessage(data.text, user.uid, selectedFriend?.uid || ''),
-            userId: data.userId,
-            userName: data.userName,
-            userPhoto: data.userPhoto,
-            timestamp: data.timestamp,
-            isImage: data.isImage || false,
-            chatId: data.chatId,
-            readBy: data.readBy || [],
-            reactions: data.reactions || {}
-          };
-          
-          loadedMessages.push(message);
-          
-          // Show notification for new messages
-          if (data.userId !== user.uid && !document.hasFocus()) {
-            playNotificationSound();
-            showSystemNotification(`Nova mensagem de ${data.userName}`, {
-              body: message.text,
-              icon: data.userPhoto,
-              tag: chatId
-            });
-          }
-        }
-      });
-      
+      // Processar todas as mensagens do snapshot
       snapshot.forEach((doc) => {
         const data = doc.data();
         const message = {
@@ -416,15 +435,28 @@ export default function ChatPage() {
           readBy: data.readBy || [],
           reactions: data.reactions || {}
         };
-        
-        if (!loadedMessages.find(m => m.id === message.id)) {
-          loadedMessages.push(message);
+        loadedMessages.push(message);
+      });
+      
+      // Identificar novas mensagens para notificações
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === 'added') {
+          const data = change.doc.data();
+          const message = loadedMessages.find(m => m.id === change.doc.id);
+          if (message && data.userId !== user.uid && !document.hasFocus()) {
+            playNotificationSound();
+            showSystemNotification(`Nova mensagem de ${data.userName}`, {
+              body: message.text,
+              icon: data.userPhoto,
+              tag: chatId
+            });
+          }
         }
       });
       
+      // Ordenar mensagens por timestamp
       loadedMessages.sort((a, b) => {
-        if (!a.timestamp || !b.timestamp) return 0;
-        return a.timestamp.toMillis() - b.timestamp.toMillis();
+        return (a.timestamp?.toMillis() || 0) - (b.timestamp?.toMillis() || 0);
       });
       
       setMessages(loadedMessages);
@@ -608,17 +640,23 @@ export default function ChatPage() {
       });
 
       // Create or find existing 1-on-1 chat
-      const existingChatQuery = query(
-        collection(db, 'chats'),
-        where('members', '==', [user.uid, friendUID].sort()),
-        where('isGroup', '==', false)
-      );
+      const sortedMembers = [user.uid, friendUID].sort();
+      const chatsQuery = query(collection(db, 'chats'), where('isGroup', '==', false));
+      const chatsSnapshot = await getDocs(chatsQuery);
       
-      const existingChatSnapshot = await getDocs(existingChatQuery);
+      let existingChat = null;
+      chatsSnapshot.forEach(doc => {
+        const chatData = doc.data();
+        if (chatData.members.length === 2 && 
+            chatData.members.includes(user.uid) && 
+            chatData.members.includes(friendUID)) {
+          existingChat = doc;
+        }
+      });
       
-      if (existingChatSnapshot.empty) {
+      if (!existingChat) {
         await addDoc(collection(db, 'chats'), {
-          members: [user.uid, friendUID].sort(),
+          members: sortedMembers,
           isGroup: false,
           createdBy: user.uid,
           lastMessage: null

@@ -1,7 +1,9 @@
+'use client';
+
 import { useState } from 'react';
-import { Button } from './button';
-import { Input } from './input';
-import { Avatar, AvatarFallback, AvatarImage } from './avatar';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { X, Users } from 'lucide-react';
 
 interface Friend {
@@ -9,7 +11,11 @@ interface Friend {
   userID: string;
   displayName: string;
   photoURL: string;
+  status?: 'online' | 'offline' | 'hidden' | 'away';
+  lastSeen?: any;
   tags?: string[];
+  lastMessage?: string;
+  lastMessageTime?: any;
 }
 
 interface GroupChatModalProps {
@@ -30,18 +36,23 @@ export function GroupChatModal({ friends, onClose, onCreateGroup }: GroupChatMod
     );
   };
 
-  const handleCreate = () => {
-    if (selectedFriends.length === 0 || !groupName.trim()) {
-      alert('Selecione pelo menos um amigo e digite um nome para o grupo');
+  const handleCreateGroup = () => {
+    if (selectedFriends.length < 1) {
+      alert('Selecione pelo menos 1 amigo para criar um grupo');
       return;
     }
     
+    if (!groupName.trim()) {
+      alert('Digite um nome para o grupo');
+      return;
+    }
+
     onCreateGroup(selectedFriends, groupName.trim());
   };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-900 border border-gray-700 rounded-lg max-w-md w-full max-h-[80vh] overflow-hidden">
+      <div className="bg-gray-800 border border-gray-700 rounded-lg w-full max-w-md max-h-[80vh] flex flex-col">
         <div className="p-4 border-b border-gray-700 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Users className="h-5 w-5 text-purple-400" />
@@ -51,13 +62,13 @@ export function GroupChatModal({ friends, onClose, onCreateGroup }: GroupChatMod
             variant="ghost"
             size="sm"
             onClick={onClose}
-            className="text-gray-400 hover:text-white hover:bg-gray-800"
+            className="text-gray-400 hover:text-white hover:bg-gray-700"
           >
             <X className="h-4 w-4" />
           </Button>
         </div>
 
-        <div className="p-4 space-y-4">
+        <div className="p-4 space-y-4 flex-1 overflow-y-auto">
           <div>
             <label className="block text-sm text-gray-300 mb-2">Nome do Grupo</label>
             <Input
@@ -72,19 +83,22 @@ export function GroupChatModal({ friends, onClose, onCreateGroup }: GroupChatMod
             <label className="block text-sm text-gray-300 mb-2">
               Selecionar Amigos ({selectedFriends.length} selecionados)
             </label>
-            <div className="max-h-60 overflow-y-auto space-y-2">
-              {friends.length === 0 ? (
-                <p className="text-gray-500 text-center py-4">
-                  Nenhum amigo disponível
-                </p>
-              ) : (
-                friends.map((friend) => (
+            
+            {friends.length === 0 ? (
+              <div className="text-center py-8">
+                <Users className="h-8 w-8 text-gray-600 mx-auto mb-2" />
+                <p className="text-gray-500 text-sm">Nenhum amigo disponível</p>
+                <p className="text-gray-600 text-xs">Adicione amigos primeiro</p>
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {friends.map((friend) => (
                   <div
                     key={friend.uid}
                     className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
                       selectedFriends.includes(friend.uid)
-                        ? 'bg-purple-600 bg-opacity-30 border border-purple-500'
-                        : 'bg-gray-800 hover:bg-gray-700'
+                        ? 'bg-purple-600 bg-opacity-20 border border-purple-500'
+                        : 'hover:bg-gray-700'
                     }`}
                     onClick={() => toggleFriend(friend.uid)}
                   >
@@ -104,24 +118,24 @@ export function GroupChatModal({ friends, onClose, onCreateGroup }: GroupChatMod
                       </div>
                     )}
                   </div>
-                ))
-              )}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
-        <div className="p-4 border-t border-gray-700 flex gap-2 justify-end">
+        <div className="p-4 border-t border-gray-700 flex gap-2">
           <Button
             variant="outline"
             onClick={onClose}
-            className="border-gray-600 text-white hover:bg-gray-800"
+            className="flex-1 border-gray-600 text-white hover:bg-gray-700"
           >
             Cancelar
           </Button>
           <Button
-            onClick={handleCreate}
-            disabled={selectedFriends.length === 0 || !groupName.trim()}
-            className="bg-purple-600 hover:bg-purple-700 text-white"
+            onClick={handleCreateGroup}
+            disabled={selectedFriends.length < 1 || !groupName.trim()}
+            className="flex-1 bg-purple-600 hover:bg-purple-700 text-white"
           >
             Criar Grupo
           </Button>
