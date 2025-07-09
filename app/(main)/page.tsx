@@ -2,14 +2,14 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import {
-  collection,
-  addDoc,
-  query,
-  orderBy,
-  onSnapshot,
-  doc,
-  updateDoc,
+import { 
+  collection, 
+  addDoc, 
+  query, 
+  orderBy, 
+  onSnapshot, 
+  doc, 
+  updateDoc, 
   getDoc,
   serverTimestamp,
   where,
@@ -37,11 +37,11 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import {
-  Send,
-  LogOut,
-  Settings,
-  Shield,
+import { 
+  Send, 
+  LogOut, 
+  Settings, 
+  Shield, 
   Users,
   Image as ImageIcon,
   Save,
@@ -280,31 +280,18 @@ export default function ChatPage() {
     return onSnapshot(q, (snapshot) => {
         const loadedMessages = snapshot.docs.map(doc => {
             const data = doc.data();
-            const receiverId = selectedChat.isGroup ? null : selectedChat.members.find(id => id !== user.uid);
+            const otherUserId = selectedChat.members.find(id => id !== user.uid) || '';
+            const decryptedText = decryptMessage(data.text, data.userId, user.uid === data.userId ? otherUserId : user.uid);
+
             return {
                 id: doc.id,
                 ...data,
-                text: selectedChat.isGroup ? data.text : decryptMessage(data.text, data.userId, receiverId || user.uid),
+                text: decryptedText,
             } as Message;
         });
         setMessages(loadedMessages);
         scrollToBottom();
     }, (error) => console.error("Erro no listener de mensagens: ", error));
-  };
-  
-  const sendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newMessage.trim() || !user || !selectedChat) return;
-  
-    const isImageUrl = /\.(jpeg|jpg|gif|png|webp|svg)$/i.test(newMessage);
-    const chatId = selectedChat.id;
-  
-    try {
-      const messageText = selectedChat.isGroup ? newMessage : encryptMessage(newMessage, user.uid, selectedFriend?.uid || '');
-      await addDoc(collection(db, 'messages'), { text: messageText, userId: user.uid, userName: user.displayName, userPhoto: user.photoURL, timestamp: serverTimestamp(), isImage: isImageUrl, chatId: chatId, readBy: [user.uid], reactions: {} });
-      await updateDoc(doc(db, 'chats', chatId), { lastMessage: { text: isImageUrl ? "📷 Imagem" : newMessage, timestamp: serverTimestamp(), sender: user.uid } });
-      setNewMessage('');
-    } catch (error) { console.error('Erro ao enviar mensagem:', error); }
   };
   
   const selectChat = (chat: DisplayChat) => {
@@ -322,6 +309,21 @@ export default function ChatPage() {
     } else {
       setSelectedFriend(null);
     }
+  };
+
+  const sendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newMessage.trim() || !user || !selectedChat) return;
+  
+    const isImageUrl = /\.(jpeg|jpg|gif|png|webp|svg)$/i.test(newMessage);
+    const chatId = selectedChat.id;
+  
+    try {
+      const messageText = selectedChat.isGroup ? newMessage : encryptMessage(newMessage, user.uid, selectedFriend?.uid || '');
+      await addDoc(collection(db, 'messages'), { text: messageText, userId: user.uid, userName: user.displayName, userPhoto: user.photoURL, timestamp: serverTimestamp(), isImage: isImageUrl, chatId: chatId, readBy: [user.uid], reactions: {} });
+      await updateDoc(doc(db, 'chats', chatId), { lastMessage: { text: isImageUrl ? "📷 Imagem" : newMessage, timestamp: serverTimestamp(), sender: user.uid } });
+      setNewMessage('');
+    } catch (error) { console.error('Erro ao enviar mensagem:', error); }
   };
 
   const handleTyping = () => {
@@ -435,7 +437,7 @@ export default function ChatPage() {
     setCopiedUserID(true);
     setTimeout(() => setCopiedUserID(false), 2000);
   };
-
+  
   useEffect(() => {
     const unsubscribes: Function[] = [];
     if (friends.length > 0) {
@@ -452,29 +454,11 @@ export default function ChatPage() {
     }
     return () => unsubscribes.forEach(unsub => unsub());
   }, [friends]);
-
-  // JSX
-  const ChatList = () => (
-    <div className="flex-1 overflow-y-auto scrollbar-hide">
-      <div className="p-2">
-        <h3 className="text-gray-400 text-sm font-medium mb-2 px-2">Conversas ({sortedChats.length})</h3>
-        {sortedChats.length === 0 ? (
-          <div className="text-center py-8"><MessageCircle className="h-8 w-8 text-gray-600 mx-auto mb-2" /><p className="text-gray-500 text-sm">Nenhuma conversa</p><p className="text-gray-600 text-xs">Adicione amigos para começar</p></div>
-        ) : (
-          <div className="space-y-1">
-            {sortedChats.map((chat) => (
-              <div key={chat.id} className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors group ${selectedChat?.id === chat.id ? 'bg-gray-700' : 'hover:bg-gray-800'}`} onClick={() => selectChat(chat)}>
-                <Avatar className="h-10 w-10"><AvatarImage src={chat.display_photo} /><AvatarFallback className="bg-gray-700 text-white">{chat.display_name?.charAt(0).toUpperCase() || '?'}</AvatarFallback></Avatar>
-                <div className="flex-1 min-w-0"><h4 className="text-white font-medium truncate">{chat.display_name}</h4>{chat.lastMessage && <p className="text-gray-400 text-xs truncate">{chat.lastMessage.text}</p>}</div>
-                {unreadCounts[chat.id] > 0 && <Badge variant="destructive" className="flex-shrink-0">{unreadCounts[chat.id] > 99 ? '99+' : unreadCounts[chat.id]}</Badge>}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
   
+  useEffect(() => {
+    // Other useEffects
+  }, []);
+
   if (loading) {
     return (
       <div className="h-screen flex items-center justify-center bg-black">
@@ -483,25 +467,48 @@ export default function ChatPage() {
     );
   }
 
+  const ChatList = () => (
+    <div className="flex-1 overflow-y-auto scrollbar-hide">
+      <div className="p-2">
+        <h3 className="text-gray-400 text-sm font-medium mb-2 px-2">Conversas ({sortedChats.length})</h3>
+        {sortedChats.map((chat) => (
+          <div key={chat.id} className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors group ${selectedChat?.id === chat.id ? 'bg-gray-700' : 'hover:bg-gray-800'}`} onClick={() => selectChat(chat)}>
+            <Avatar className="h-10 w-10"><AvatarImage src={chat.display_photo} /><AvatarFallback className="bg-gray-700 text-white">{chat.display_name?.charAt(0).toUpperCase() || '?'}</AvatarFallback></Avatar>
+            <div className="flex-1 min-w-0"><h4 className="text-white font-medium truncate">{chat.display_name}</h4>{chat.lastMessage && <p className="text-gray-400 text-xs truncate">{chat.lastMessage.text}</p>}</div>
+            {unreadCounts[chat.id] > 0 && <Badge variant="destructive" className="flex-shrink-0">{unreadCounts[chat.id] > 99 ? '99+' : unreadCounts[chat.id]}</Badge>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+  
   return (
     <div className="h-screen [-webkit-app-region:no-drag] flex bg-black text-white overflow-hidden">
       <MobileFriendsDrawer friendsCount={sortedChats.length}>
         {/* Mobile Sidebar Content */}
-      </MobileFriendsDrawer>
-
-      <div className="hidden sm:flex w-80 bg-gray-900 border-r border-gray-700 flex-col overflow-hidden">
-        {/* User Info & Actions */}
         <div className="p-4 border-b border-gray-700">
             <div className="flex items-center gap-3 mb-3">
                 <Avatar className="h-12 w-12 ring-2 ring-white"><AvatarImage src={user?.photoURL} /><AvatarFallback className="bg-gray-700 text-white">{user?.displayName?.charAt(0)}</AvatarFallback></Avatar>
                 <div className="flex-1 min-w-0"><h2 className="text-white font-semibold truncate">{user?.displayName}</h2><div className="flex items-center gap-1"><Badge variant="secondary" className="text-xs bg-green-600 text-white">{user?.userID}</Badge><Button variant="ghost" size="sm" onClick={copyUserID} className="h-6 w-6 p-0 text-gray-400 hover:text-white hover:bg-gray-700" title="Copiar ID">{copiedUserID ? <Check className="h-3 w-3 text-green-400" /> : <Copy className="h-3 w-3" />}</Button></div></div>
             </div>
-            <div className="flex gap-2">
-                <Button variant="ghost" size="sm" onClick={() => setEditingProfile(!editingProfile)} className="text-gray-400 hover:text-white hover:bg-gray-800"><Settings className="h-4 w-4" /></Button>
-                <Button variant="ghost" size="sm" onClick={() => setSoundEnabled(!soundEnabled)} className="text-gray-400 hover:text-white hover:bg-gray-800">{soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}</Button>
-                {user?.isAdmin && (<Button variant="ghost" size="sm" onClick={() => router.push('/admin')} className="text-gray-400 hover:text-white hover:bg-gray-800"><Users className="h-4 w-4" /></Button>)}
-                <Button variant="ghost" size="sm" onClick={handleLogout} className="text-gray-400 hover:text-white hover:bg-gray-800"><LogOut className="h-4 w-4" /></Button>
-            </div>
+        </div>
+        <div className="p-4 border-b border-gray-700"><div className="flex gap-2 mb-2"><Input value={newFriendID} onChange={(e) => setNewFriendID(e.target.value)} placeholder="ID do amigo (ex: del#1234)" className="bg-gray-700 border-gray-600 text-white" onKeyPress={(e) => { if (e.key === 'Enter') addFriend(); }}/><Button onClick={addFriend} disabled={addingFriend} className="bg-white text-black hover:bg-gray-200" title="Adicionar amigo">{addingFriend ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-black"></div> : <UserPlus className="h-4 w-4" />}</Button></div><Button onClick={() => setShowGroupModal(true)} className="w-full bg-purple-600 hover:bg-purple-700 text-white" size="sm"><Plus className="h-4 w-4 mr-2" />Criar Grupo</Button></div>
+        <ChatList />
+      </MobileFriendsDrawer>
+
+      <div className="hidden sm:flex w-80 bg-gray-900 border-r border-gray-700 flex-col overflow-hidden">
+        {/* User Info & Actions */}
+        <div className="p-4 border-b border-gray-700">
+          <div className="flex items-center gap-3 mb-3">
+            <Avatar className="h-12 w-12 ring-2 ring-white"><AvatarImage src={user?.photoURL} /><AvatarFallback className="bg-gray-700 text-white">{user?.displayName?.charAt(0)}</AvatarFallback></Avatar>
+            <div className="flex-1 min-w-0"><h2 className="text-white font-semibold truncate">{user?.displayName}</h2><div className="flex items-center gap-1"><Badge variant="secondary" className="text-xs bg-green-600 text-white">{user?.userID}</Badge><Button variant="ghost" size="sm" onClick={copyUserID} className="h-6 w-6 p-0 text-gray-400 hover:text-white hover:bg-gray-700" title="Copiar ID">{copiedUserID ? <Check className="h-3 w-3 text-green-400" /> : <Copy className="h-3 w-3" />}</Button></div></div>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setEditingProfile(!editingProfile)} className="text-gray-400 hover:text-white hover:bg-gray-800"><Settings className="h-4 w-4" /></Button>
+            <Button variant="ghost" size="sm" onClick={() => setSoundEnabled(!soundEnabled)} className="text-gray-400 hover:text-white hover:bg-gray-800">{soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}</Button>
+            {user?.isAdmin && (<Button variant="ghost" size="sm" onClick={() => router.push('/admin')} className="text-gray-400 hover:text-white hover:bg-gray-800"><Users className="h-4 w-4" /></Button>)}
+            <Button variant="ghost" size="sm" onClick={handleLogout} className="text-gray-400 hover:text-white hover:bg-gray-800"><LogOut className="h-4 w-4" /></Button>
+          </div>
         </div>
         {editingProfile && (<div className="p-4 border-b border-gray-700 bg-gray-800 space-y-3"><h3 className="text-white text-sm font-medium">Editar Perfil</h3><Input value={newDisplayName} onChange={(e) => setNewDisplayName(e.target.value)} placeholder="Nome de exibição" className="bg-gray-700 border-gray-600 text-white"/><Input value={newPhotoURL} onChange={(e) => setNewPhotoURL(e.target.value)} placeholder="URL da foto" className="bg-gray-700 border-gray-600 text-white"/><div className="flex gap-2"><Button size="sm" onClick={updateProfile} disabled={savingProfile} className="bg-white text-black hover:bg-gray-200"><Save className="h-4 w-4 mr-1" />{savingProfile ? 'Salvando...' : 'Salvar'}</Button><Button size="sm" variant="outline" onClick={() => setEditingProfile(false)} className="border-gray-600 text-white hover:bg-gray-800"><X className="h-4 w-4 mr-1" />Cancelar</Button></div></div>)}
         <div className="p-4 border-b border-gray-700"><div className="flex gap-2 mb-2"><Input value={newFriendID} onChange={(e) => setNewFriendID(e.target.value)} placeholder="ID do amigo (ex: del#1234)" className="bg-gray-700 border-gray-600 text-white" onKeyPress={(e) => { if (e.key === 'Enter') addFriend(); }}/><Button onClick={addFriend} disabled={addingFriend} className="bg-white text-black hover:bg-gray-200" title="Adicionar amigo">{addingFriend ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-black"></div> : <UserPlus className="h-4 w-4" />}</Button></div><Button onClick={() => setShowGroupModal(true)} className="w-full bg-purple-600 hover:bg-purple-700 text-white" size="sm"><Plus className="h-4 w-4 mr-2" />Criar Grupo</Button></div>
@@ -514,10 +521,7 @@ export default function ChatPage() {
             <div className="bg-gray-900 border-b border-gray-700 p-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <Avatar className="h-10 w-10"><AvatarImage src={selectedChat.display_photo} /><AvatarFallback>{selectedChat.display_name?.charAt(0)}</AvatarFallback></Avatar>
-                <div>
-                  <h2 className="text-white font-semibold">{selectedChat.display_name}</h2>
-                  {!selectedChat.isGroup && selectedFriend && (<div className="flex items-center gap-2"><p className="text-gray-400 text-sm">{selectedFriend.userID}</p>{selectedFriend.status && selectedFriend.status !== 'hidden' && (<Badge variant="secondary" className={`text-xs ${selectedFriend.status === 'online' ? 'bg-green-600 text-white' : selectedFriend.status === 'away' ? 'bg-yellow-500 text-white' : 'bg-gray-600 text-white'}`}>{selectedFriend.status}</Badge>)}</div>)}
-                </div>
+                <div><h2 className="text-white font-semibold">{selectedChat.display_name}</h2>{!selectedChat.isGroup && selectedFriend && (<div className="flex items-center gap-2"><p className="text-gray-400 text-sm">{selectedFriend.userID}</p>{selectedFriend.status && selectedFriend.status !== 'hidden' && (<Badge variant="secondary" className={`text-xs ${selectedFriend.status === 'online' ? 'bg-green-600' : 'bg-gray-600'}`}>{selectedFriend.status}</Badge>)}</div>)}</div>
               </div>
               <Button variant="ghost" size="sm" onClick={() => setShowSearch(!showSearch)}><Search className="h-4 w-4" /></Button>
             </div>
