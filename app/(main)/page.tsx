@@ -184,8 +184,6 @@ export default function ChatPage() {
   const loadUserData = async (userId: string) => {
     try {
       const userDoc = await getDoc(doc(db, 'users', userId));
-      const isUserAdmin = isAdminUID(userId);
-      
       if (userDoc.exists()) {
         const userData = userDoc.data();
         let userID = userData.userID;
@@ -205,7 +203,7 @@ export default function ChatPage() {
             email: currentUser.email || '',
             displayName: currentUser.displayName || 'Usuário',
             photoURL: currentUser.photoURL || `https://api.dicebear.com/6.x/initials/svg?seed=${currentUser.email}`,
-            isAdmin: isUserAdmin,
+            isAdmin: isAdminUID(userId),
             createdAt: new Date(),
             userID: userID,
             friends: [],
@@ -282,19 +280,21 @@ export default function ChatPage() {
     return onSnapshot(q, (snapshot) => {
         const loadedMessages = snapshot.docs.map(doc => {
             const data = doc.data();
-            const receiverId = selectedChat.isGroup ? null : selectedChat.members.find(id => id !== user.uid);
+            const otherUserId = selectedChat.isGroup ? null : selectedChat.members.find(id => id !== user.uid);
+            const decryptedText = selectedChat.isGroup 
+                ? data.text 
+                : decryptMessage(data.text, data.userId, user.uid === data.userId ? otherUserId || '' : user.uid);
+            
             return {
                 id: doc.id,
                 ...data,
-                text: selectedChat.isGroup ? data.text : decryptMessage(data.text, data.userId, user.uid === data.userId ? receiverId || '' : user.uid),
+                text: decryptedText,
             } as Message;
         });
         setMessages(loadedMessages);
-        setFilteredMessages(loadedMessages); // Update filtered messages as well
-        scrollToBottom();
     }, (error) => console.error("Erro no listener de mensagens: ", error));
   };
-
+  
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim() || !user || !selectedChat) return;
@@ -309,7 +309,7 @@ export default function ChatPage() {
       setNewMessage('');
     } catch (error) { console.error('Erro ao enviar mensagem:', error); }
   };
-
+  
   const selectChat = (chat: DisplayChat) => {
     if (!user) return;
     setSelectedChat(chat);
@@ -457,21 +457,13 @@ export default function ChatPage() {
   }, [friends]);
   
   useEffect(() => {
-    const unsubscribes: Function[] = [];
-    if (friends.length > 0) {
-      friends.forEach(friend => {
-        const statusRef = ref(rtdb, `/status/${friend.uid}`);
-        const unsubscribe = onValue(statusRef, (snapshot) => {
-          if (snapshot.exists()) {
-            const status = snapshot.val();
-            setFriends(prevFriends => prevFriends.map(f => f.uid === friend.uid ? { ...f, status: status.state, lastSeen: status.last_changed } : f));
-          }
-        });
-        unsubscribes.push(unsubscribe);
-      }
-    )}
-    return () => unsubscribes.forEach(unsub => unsub());
-  }, [friends]);
+    if (searchQuery.trim() === '') {
+        setFilteredMessages(messages);
+    } else {
+        const filtered = messages.filter(msg => msg.text.toLowerCase().includes(searchQuery.toLowerCase()));
+        setFilteredMessages(filtered);
+    }
+  }, [searchQuery, messages]);
 
   if (loading) {
     return (
@@ -485,19 +477,13 @@ export default function ChatPage() {
     <div className="flex-1 overflow-y-auto scrollbar-hide">
       <div className="p-2">
         <h3 className="text-gray-400 text-sm font-medium mb-2 px-2">Conversas ({sortedChats.length})</h3>
-        {sortedChats.length === 0 ? (
-          <div className="text-center py-8"><MessageCircle className="h-8 w-8 text-gray-600 mx-auto mb-2" /><p className="text-gray-500 text-sm">Nenhuma conversa</p><p className="text-gray-600 text-xs">Adicione amigos para começar</p></div>
-        ) : (
-          <div className="space-y-1">
-            {sortedChats.map((chat) => (
-              <div key={chat.id} className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors group ${selectedChat?.id === chat.id ? 'bg-gray-700' : 'hover:bg-gray-800'}`} onClick={() => selectChat(chat)}>
-                <Avatar className="h-10 w-10"><AvatarImage src={chat.display_photo} /><AvatarFallback className="bg-gray-700 text-white">{chat.display_name?.charAt(0).toUpperCase() || '?'}</AvatarFallback></Avatar>
-                <div className="flex-1 min-w-0"><h4 className="text-white font-medium truncate">{chat.display_name}</h4>{chat.lastMessage && <p className="text-gray-400 text-xs truncate">{chat.lastMessage.text}</p>}</div>
-                {unreadCounts[chat.id] > 0 && <Badge variant="destructive" className="flex-shrink-0">{unreadCounts[chat.id] > 99 ? '99+' : unreadCounts[chat.id]}</Badge>}
-              </div>
-            ))}
+        {sortedChats.map((chat) => (
+          <div key={chat.id} className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors group ${selectedChat?.id === chat.id ? 'bg-gray-700' : 'hover:bg-gray-800'}`} onClick={() => selectChat(chat)}>
+            <Avatar className="h-10 w-10"><AvatarImage src={chat.display_photo} /><AvatarFallback className="bg-gray-700 text-white">{chat.display_name?.charAt(0).toUpperCase() || '?'}</AvatarFallback></Avatar>
+            <div className="flex-1 min-w-0"><h4 className="text-white font-medium truncate">{chat.display_name}</h4>{chat.lastMessage && <p className="text-gray-400 text-xs truncate">{chat.lastMessage.text}</p>}</div>
+            {unreadCounts[chat.id] > 0 && <Badge variant="destructive" className="flex-shrink-0">{unreadCounts[chat.id] > 99 ? '99+' : unreadCounts[chat.id]}</Badge>}
           </div>
-        )}
+        ))}
       </div>
     </div>
   );
@@ -543,7 +529,7 @@ export default function ChatPage() {
             <div className="bg-gray-900 border-b border-gray-700 p-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <Avatar className="h-10 w-10"><AvatarImage src={selectedChat.display_photo} /><AvatarFallback>{selectedChat.display_name?.charAt(0)}</AvatarFallback></Avatar>
-                <div><h2 className="text-white font-semibold">{selectedChat.display_name}</h2>{!selectedChat.isGroup && selectedFriend && (<div className="flex items-center gap-2"><p className="text-gray-400 text-sm">{selectedFriend.userID}</p>{selectedFriend.status && selectedFriend.status !== 'hidden' && (<Badge variant="secondary" className={`text-xs ${selectedFriend.status === 'online' ? 'bg-green-600' : 'bg-gray-600'}`}>{selectedFriend.status}</Badge>)}</div>)}</div>
+                <div><h2 className="text-white font-semibold">{selectedChat.display_name}</h2>{!selectedChat.isGroup && selectedFriend && (<div className="flex items-center gap-2"><p className="text-gray-400 text-sm">{selectedFriend.userID}</p>{selectedFriend.status && selectedFriend.status !== 'hidden' && (<Badge variant="secondary" className={`text-xs ${selectedFriend.status === 'online' ? 'bg-green-600 text-white' : 'bg-gray-600'}`}>{selectedFriend.status}</Badge>)}</div>)}</div>
               </div>
               <Button variant="ghost" size="sm" onClick={() => setShowSearch(!showSearch)}><Search className="h-4 w-4" /></Button>
             </div>
