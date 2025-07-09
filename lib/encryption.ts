@@ -4,6 +4,25 @@ import CryptoJS from 'crypto-js';
 const SECRET_KEY = 'BatePapoPrivado2024SecretKey!@#$%';
 
 /**
+ * Verifica se uma string parece ser um texto criptografado em Base64 pelo CryptoJS.
+ * @param str - A string a ser verificada.
+ * @returns 'true' se a string for potencialmente criptografada.
+ */
+function isLikelyEncrypted(str: string): boolean {
+  if (typeof str !== 'string' || str.length < 16) {
+    return false;
+  }
+  // A saída padrão do CryptoJS.AES.encrypt é um objeto que, quando convertido para string,
+  // não se parece com texto comum. Uma verificação simples pode ser a ausência de espaços
+  // e a presença de caracteres comuns em Base64.
+  const base64Regex = /^[A-Za-z0-9+/=]+$/;
+  // Esta verificação não é 100% garantida, mas ajuda a evitar a tentativa de descriptografar
+  // texto puro, que é a causa do erro "Malformed UTF-8 data".
+  return str.includes('U2FsdGVkX1') || base64Regex.test(str.replace(/\s/g, ''));
+}
+
+
+/**
  * Gera uma chave única para cada conversa baseada nos UIDs dos participantes
  * @param senderId - UID do remetente
  * @param receiverId - UID do destinatário
@@ -42,6 +61,11 @@ export function encryptMessage(text: string, senderId: string, receiverId: strin
  * @returns Texto descriptografado
  */
 export function decryptMessage(encryptedText: string, senderId: string, receiverId: string): string {
+  // CORREÇÃO: Verifica se o texto realmente parece estar criptografado antes de tentar.
+  if (!isLikelyEncrypted(encryptedText)) {
+    return encryptedText;
+  }
+
   try {
     const chatKey = generateChatKey(senderId, receiverId);
     const decrypted = CryptoJS.AES.decrypt(encryptedText, chatKey);
@@ -51,18 +75,16 @@ export function decryptMessage(encryptedText: string, senderId: string, receiver
       return result;
     }
     
-    // Se falhar, tenta com a chave antiga (compatibilidade com mensagens antigas)
     throw new Error('Falha na descriptografia com chave da conversa');
   } catch (error) {
-    // Se a descriptografia falhar, pode ser uma mensagem antiga com a chave global
     try {
       const decrypted = CryptoJS.AES.decrypt(encryptedText, SECRET_KEY);
       const originalText = decrypted.toString(CryptoJS.enc.Utf8);
       if (originalText) return originalText;
     } catch (e) {
-      // CORREÇÃO: Alterado 'error' para 'e' para exibir o erro correto.
       console.error('Erro ao descriptografar mensagem com ambas as chaves:', e);
     }
-    return encryptedText; // Retorna o texto criptografado em caso de erro
+    // Se tudo falhar, retorna o texto como está para não quebrar a interface.
+    return encryptedText;
   }
 }
