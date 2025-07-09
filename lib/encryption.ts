@@ -12,13 +12,10 @@ function isLikelyEncrypted(str: string): boolean {
   if (typeof str !== 'string' || str.length < 16) {
     return false;
   }
-  // A saída padrão do CryptoJS.AES.encrypt é um objeto que, quando convertido para string,
-  // não se parece com texto comum. Uma verificação simples pode ser a ausência de espaços
-  // e a presença de caracteres comuns em Base64.
-  const base64Regex = /^[A-Za-z0-9+/=]+$/;
-  // Esta verificação não é 100% garantida, mas ajuda a evitar a tentativa de descriptografar
-  // texto puro, que é a causa do erro "Malformed UTF-8 data".
-  return str.includes('U2FsdGVkX1') || base64Regex.test(str.replace(/\s/g, ''));
+  // Verifica estritamente se a string começa com o prefixo único do CryptoJS
+  // 'U2FsdGVkX1' é o identificador único para strings criptografadas pelo CryptoJS
+  // usando o formato OpenSSL padrão
+  return str.startsWith('U2FsdGVkX1');
 }
 
 
