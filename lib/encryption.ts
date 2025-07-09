@@ -51,20 +51,18 @@ export function decryptMessage(encryptedText: string, senderId: string, receiver
       return result;
     }
     
-    // Se falhar, continua para tentar com a chave antiga (compatibilidade com mensagens antigas)
+    // Se falhar, tenta com a chave antiga (compatibilidade com mensagens antigas)
+    throw new Error('Falha na descriptografia com chave da conversa');
   } catch (error) {
-    // Continua para tentar com a chave global se houver erro na primeira tentativa
+    // Se a descriptografia falhar, pode ser uma mensagem antiga com a chave global
+    try {
+      const decrypted = CryptoJS.AES.decrypt(encryptedText, SECRET_KEY);
+      const originalText = decrypted.toString(CryptoJS.enc.Utf8);
+      if (originalText) return originalText;
+    } catch (e) {
+      // CORREÇÃO: Alterado 'error' para 'e' para exibir o erro correto.
+      console.error('Erro ao descriptografar mensagem com ambas as chaves:', e);
+    }
+    return encryptedText; // Retorna o texto criptografado em caso de erro
   }
-  
-  // Se a descriptografia falhar, tenta com a chave antiga (compatibilidade com mensagens antigas)
-  try {
-    const decrypted = CryptoJS.AES.decrypt(encryptedText, SECRET_KEY);
-    const originalText = decrypted.toString(CryptoJS.enc.Utf8);
-    if (originalText) return originalText;
-  } catch (e) {
-    // Só registra erro se ambas as tentativas falharem
-  }
-  
-  console.error('Erro ao descriptografar mensagem com ambas as chaves - retornando texto original');
-  return encryptedText; // Retorna o texto criptografado em caso de erro
 }
