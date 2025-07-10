@@ -151,6 +151,8 @@ export default function ChatPage() {
 
   const [unreadCounts, setUnreadCounts] = useState<{ [chatId: string]: number }>({});
   const [sortedChats, setSortedChats] = useState<DisplayChat[]>([]);
+  const [onlineUsers, setOnlineUsers] = useState<{ [uid: string]: { status: string; lastSeen: any } }>({});
+  const [groupOnlineCount, setGroupOnlineCount] = useState(0);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -178,11 +180,18 @@ export default function ChatPage() {
       const unsubscribePromise = loadChats();
       setupUserPresence(user.uid, statusMode);
       requestNotificationPermission();
+      setupOnlineUsersListener();
       return () => {
         unsubscribePromise.then(unsub => unsub && unsub());
       }
     }
   }, [user]);
+
+  useEffect(() => {
+    if (selectedChat && selectedChat.isGroup && user) {
+      updateGroupOnlineCount();
+    }
+  }, [selectedChat, onlineUsers, user]);
 
   useEffect(() => {
     if (user && sortedChats.length > 0) {
@@ -271,6 +280,57 @@ export default function ChatPage() {
       setFilteredMessages(filtered);
     }
   }, [searchQuery, messages]);
+
+  const setupOnlineUsersListener = () => {
+    if (!user) return;
+
+    // Listen to all users' online status
+    const statusRef = ref(rtdb, '/status');
+    const unsubscribe = onValue(statusRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const statusData = snapshot.val();
+        setOnlineUsers(statusData);
+      }
+    });
+
+    return unsubscribe;
+  };
+
+  const updateGroupOnlineCount = () => {
+    if (!selectedChat || !selectedChat.isGroup || !user) return;
+
+    const onlineCount = selectedChat.members.filter(memberId => {
+      if (memberId === user.uid) return true; // Current user is always counted as online
+      const memberStatus = onlineUsers[memberId];
+      return memberStatus && memberStatus.status === 'online';
+    }).length;
+
+    setGroupOnlineCount(onlineCount);
+  };
+
+  const getUserStatus = (userId: string) => {
+    const userStatus = onlineUsers[userId];
+    if (!userStatus) return 'offline';
+    return userStatus.status || 'offline';
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'online': return 'text-green-500 fill-green-500';
+      case 'away': return 'text-yellow-500';
+      case 'hidden': return 'text-gray-500';
+      default: return 'text-gray-500 fill-gray-500';
+    }
+  };
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'online': return Circle;
+      case 'away': return Clock;
+      case 'hidden': return Eye;
+      default: return Circle;
+    }
+  };
 
   useEffect(() => {
     if (messages.length > 0 && user && selectedChat) {
@@ -847,6 +907,22 @@ export default function ChatPage() {
                   <div className="flex-1 min-w-0">
                     <h4 className="text-white font-medium truncate">
                       {chat.display_name}
+                      {!chat.isGroup && (() => {
+                        const friendUID = chat.members.find(uid => uid !== user?.uid);
+                        const friendStatus = friendUID ? getUserStatus(friendUID) : 'offline';
+                        const StatusIcon = getStatusIcon(friendStatus);
+                        return friendStatus === 'online' ? (
+                          <StatusIcon className={`h-3 w-3 ${getStatusColor(friendStatus)}`} />
+                        ) : null;
+                      })()}
+                      {!chat.isGroup && (() => {
+                        const friendUID = chat.members.find(uid => uid !== user?.uid);
+                        const friendStatus = friendUID ? getUserStatus(friendUID) : 'offline';
+                        const StatusIcon = getStatusIcon(friendStatus);
+                        return friendStatus === 'online' ? (
+                          <StatusIcon className={`h-3 w-3 ${getStatusColor(friendStatus)}`} />
+                        ) : null;
+                      })()}
                     </h4>
                     {chat.lastMessage && (
                       <p className="text-gray-400 text-xs truncate">
@@ -1092,8 +1168,26 @@ export default function ChatPage() {
                     {!selectedChat.isGroup && selectedFriend && (
                         <div className="flex items-center gap-2">
                           <p className="text-gray-400 text-sm">{selectedFriend.userID}</p>
+                          {(() => {
+                            const friendStatus = getUserStatus(selectedFriend.uid);
+                            const StatusIcon = getStatusIcon(friendStatus);
+                            return (
+                              <div className="flex items-center gap-1">
+                                <StatusIcon className={`h-3 w-3 ${getStatusColor(friendStatus)}`} />
+                                <span className="text-xs text-gray-400 capitalize">{friendStatus}</span>
+                              </div>
+                            );
+                          })()}
                           <UserTags tags={selectedFriend.tags || []} size="sm" />
                         </div>
+                    )}
+                    {selectedChat.isGroup && (
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1">
+                          <Circle className="h-3 w-3 text-green-500 fill-green-500" />
+                          <span className="text-xs text-gray-400">{groupOnlineCount} online</span>
+                        </div>
+                      </div>
                     )}
                   </div>
                 </div>
