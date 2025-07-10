@@ -898,33 +898,28 @@ export default function ChatPage() {
                   }`}
                   onClick={() => selectChat(chat)}
                 >
-                  <Avatar className="h-10 w-10">
+                  <div className="relative">
+                    <Avatar className="h-10 w-10">
                     <AvatarImage src={chat.display_photo} />
                     <AvatarFallback className="bg-gray-700 text-white">
                       {chat.display_name?.charAt(0).toUpperCase() || '?'}
                     </AvatarFallback>
                   </Avatar>
-                  <div className="flex-1 min-w-0">
-                    <h4 className="text-white font-medium truncate">
-                      {chat.display_name}
+                  {!chat.isGroup && (() => {
+                    const friendUID = chat.members.find(uid => uid !== user?.uid);
+                    const friendStatus = friendUID ? getUserStatus(friendUID) : 'offline';
+                    const StatusIcon = getStatusIcon(friendStatus);
+                    return (
                       {!chat.isGroup && (() => {
-                        const friendUID = chat.members.find(uid => uid !== user?.uid);
-                        const friendStatus = friendUID ? getUserStatus(friendUID) : 'offline';
-                        const StatusIcon = getStatusIcon(friendStatus);
-                        return friendStatus === 'online' ? (
-                          <StatusIcon className={`h-3 w-3 ${getStatusColor(friendStatus)}`} />
-                        ) : null;
-                      })()}
-                      {!chat.isGroup && (() => {
-                        const friendUID = chat.members.find(uid => uid !== user?.uid);
-                        const friendStatus = friendUID ? getUserStatus(friendUID) : 'offline';
-                        const StatusIcon = getStatusIcon(friendStatus);
-                        return friendStatus === 'online' ? (
-                          <StatusIcon className={`h-3 w-3 ${getStatusColor(friendStatus)}`} />
-                        ) : null;
-                      })()}
-                    </h4>
                     {chat.lastMessage && (
+                        const friendStatus = friendUID ? getUserStatus(friendUID) : 'offline';
+                        const StatusIcon = getStatusIcon(friendStatus);
+                        return (
+                          <div className="flex items-center">
+                            <StatusIcon className={`h-3 w-3 ${getStatusColor(friendStatus)}`} />
+                          </div>
+                        );
+                      })()}
                       <p className="text-gray-400 text-xs truncate">
                         {chat.lastMessage.text}
                       </p>
