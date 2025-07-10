@@ -20,7 +20,7 @@ export const setupUserPresence = (userId: string, statusMode: 'online' | 'offlin
     last_changed: rtdbServerTimestamp(),
   };
 
-  const currentStatusForDatabase = {
+  let currentStatusForDatabase = {
     state: statusMode,
     last_changed: rtdbServerTimestamp(),
   };
@@ -32,6 +32,11 @@ export const setupUserPresence = (userId: string, statusMode: 'online' | 'offlin
       return;
     }
 
+    // Update current status when connection is established
+    currentStatusForDatabase = {
+      state: statusMode,
+      last_changed: rtdbServerTimestamp(),
+    };
     onDisconnect(userStatusRef).set(isOfflineForDatabase).then(() => {
       set(userStatusRef, currentStatusForDatabase);
     });
@@ -48,6 +53,15 @@ export const setupUserPresence = (userId: string, statusMode: 'online' | 'offlin
       }).catch(console.error);
     }
   });
+
+  // Return a function to update status manually
+  return (newStatus: 'online' | 'offline' | 'hidden' | 'away') => {
+    const newStatusData = {
+      state: newStatus,
+      last_changed: rtdbServerTimestamp(),
+    };
+    return set(userStatusRef, newStatusData);
+  };
 };
 
 // Função para atualizar status do usuário manualmente

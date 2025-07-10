@@ -153,6 +153,7 @@ export default function ChatPage() {
   const [sortedChats, setSortedChats] = useState<DisplayChat[]>([]);
   const [onlineUsers, setOnlineUsers] = useState<{ [uid: string]: { status: string; lastSeen: any } }>({});
   const [groupOnlineCount, setGroupOnlineCount] = useState(0);
+  const [statusTimeouts, setStatusTimeouts] = useState<{ [uid: string]: NodeJS.Timeout }>({});
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -284,12 +285,65 @@ export default function ChatPage() {
   const setupOnlineUsersListener = () => {
     if (!user) return;
 
-    // Listen to all users' online status
     const statusRef = ref(rtdb, '/status');
     const unsubscribe = onValue(statusRef, (snapshot) => {
       if (snapshot.exists()) {
         const statusData = snapshot.val();
-        setOnlineUsers(statusData);
+        
+        // Process status changes with timing logic
+        setOnlineUsers(prevUsers => {
+          const newUsers = { ...prevUsers };
+          
+          Object.keys(statusData).forEach(uid => {
+            const currentStatus = statusData[uid];
+            const previousStatus = prevUsers[uid];
+            
+            // Clear any existing timeout for this user
+            if (statusTimeouts[uid]) {
+              clearTimeout(statusTimeouts[uid]);
+              setStatusTimeouts(prev => {
+                const newTimeouts = { ...prev };
+                delete newTimeouts[uid];
+                return newTimeouts;
+              });
+            }
+            
+            // If user just went from online to offline, set a 1-minute delay
+            if (previousStatus?.status === 'online' && currentStatus.state === 'offline') {
+              // Keep showing as online for 1 minute
+              newUsers[uid] = { ...previousStatus };
+              
+              // Set timeout to change to offline after 1 minute
+              const timeoutId = setTimeout(() => {
+                setOnlineUsers(prev => ({
+                  ...prev,
+                  [uid]: currentStatus
+                }));
+                setStatusTimeouts(prev => {
+                  const newTimeouts = { ...prev };
+                  delete newTimeouts[uid];
+                  return newTimeouts;
+                });
+              }, 60000); // 1 minute
+              
+              setStatusTimeouts(prev => ({
+                ...prev,
+                [uid]: timeoutId
+              }));
+            } else if (currentStatus.state === 'online') {
+              // Immediately show online status
+              newUsers[uid] = currentStatus;
+            } else if (currentStatus.state === 'away') {
+              // Keep away status as is, don't change it
+              newUsers[uid] = currentStatus;
+            } else {
+              // For other status changes, update immediately
+              newUsers[uid] = currentStatus;
+            }
+          });
+          
+          return newUsers;
+        });
       }
     });
 
@@ -316,10 +370,10 @@ export default function ChatPage() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'online': return 'text-green-500 fill-green-500';
-      case 'away': return 'text-yellow-500';
-      case 'hidden': return 'text-gray-500';
-      default: return 'text-gray-500 fill-gray-500';
+      case 'online': return 'text-green-500 fill-green-500 bg-green-500';
+      case 'away': return 'text-yellow-500 fill-yellow-500 bg-yellow-500';
+      case 'hidden': return 'text-gray-500 fill-gray-500 bg-gray-500';
+      default: return 'text-gray-500 fill-gray-500 bg-gray-500';
     }
   };
 
@@ -908,10 +962,9 @@ export default function ChatPage() {
                     {!chat.isGroup && (() => {
                       const friendUID = chat.members.find(uid => uid !== user?.uid);
                       const friendStatus = friendUID ? getUserStatus(friendUID) : 'offline';
-                      const StatusIcon = getStatusIcon(friendStatus);
                       return (
-                        <div className="absolute -bottom-1 -right-1">
-                          <StatusIcon className={`h-3 w-3 ${getStatusColor(friendStatus)}`} />
+                        <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-gray-900 flex items-center justify-center">
+                          <div className={`w-2 h-2 rounded-full ${getStatusColor(friendStatus)}`} />
                         </div>
                       );
                     })()}
@@ -1069,25 +1122,25 @@ export default function ChatPage() {
                     <SelectContent className="bg-gray-800 border-gray-600">
                       <SelectItem value="online" className="text-white hover:bg-gray-700">
                         <div className="flex items-center gap-2">
-                          <Circle className="h-3 w-3 fill-green-500 text-green-500" />
+                          <div className="w-3 h-3 rounded-full bg-green-500" />
                           Online
                         </div>
                       </SelectItem>
                       <SelectItem value="away" className="text-white hover:bg-gray-700">
                         <div className="flex items-center gap-2">
-                          <Clock className="h-3 w-3 text-yellow-500" />
+                          <div className="w-3 h-3 rounded-full bg-yellow-500" />
                           Ausente
                         </div>
                       </SelectItem>
                       <SelectItem value="hidden" className="text-white hover:bg-gray-700">
                         <div className="flex items-center gap-2">
-                          <Eye className="h-3 w-3 text-gray-500" />
+                          <div className="w-3 h-3 rounded-full bg-gray-500" />
                           Oculto
                         </div>
                       </SelectItem>
                       <SelectItem value="offline" className="text-white hover:bg-gray-700">
                         <div className="flex items-center gap-2">
-                          <Circle className="h-3 w-3 fill-gray-500 text-gray-500" />
+                          <div className="w-3 h-3 rounded-full bg-gray-500" />
                           Offline
                         </div>
                       </SelectItem>
@@ -1171,10 +1224,9 @@ export default function ChatPage() {
                           <p className="text-gray-400 text-sm">{selectedFriend.userID}</p>
                           {(() => {
                             const friendStatus = getUserStatus(selectedFriend.uid);
-                            const StatusIcon = getStatusIcon(friendStatus);
                             return (
-                              <div className="flex items-center gap-1">
-                                <StatusIcon className={`h-3 w-3 ${getStatusColor(friendStatus)}`} />
+                              <div className="flex items-center gap-2">
+                                <div className={`w-2 h-2 rounded-full ${getStatusColor(friendStatus)}`} />
                                 <span className="text-xs text-gray-400 capitalize">{friendStatus}</span>
                               </div>
                             );
@@ -1185,7 +1237,7 @@ export default function ChatPage() {
                     {selectedChat.isGroup && (
                       <div className="flex items-center gap-2">
                         <div className="flex items-center gap-1">
-                          <Circle className="h-3 w-3 text-green-500 fill-green-500" />
+                          <div className="w-2 h-2 rounded-full bg-green-500" />
                           <span className="text-xs text-gray-400">{groupOnlineCount} online</span>
                         </div>
                       </div>
