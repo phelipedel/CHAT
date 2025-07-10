@@ -900,26 +900,32 @@ export default function ChatPage() {
                 >
                   <div className="relative">
                     <Avatar className="h-10 w-10">
-                    <AvatarImage src={chat.display_photo} />
-                    <AvatarFallback className="bg-gray-700 text-white">
-                      {chat.display_name?.charAt(0).toUpperCase() || '?'}
-                    </AvatarFallback>
-                  </Avatar>
-                  {!chat.isGroup && (() => {
-                    const friendUID = chat.members.find(uid => uid !== user?.uid);
-                    const friendStatus = friendUID ? getUserStatus(friendUID) : 'offline';
-                    const StatusIcon = getStatusIcon(friendStatus);
-                    return (
-                      {!chat.isGroup && (() => {
+                      <AvatarImage src={chat.display_photo} />
+                      <AvatarFallback className="bg-gray-700 text-white">
+                        {chat.display_name?.charAt(0).toUpperCase() || '?'}
+                      </AvatarFallback>
+                    </Avatar>
+                    {!chat.isGroup && (() => {
+                      const friendUID = chat.members.find(uid => uid !== user?.uid);
+                      const friendStatus = friendUID ? getUserStatus(friendUID) : 'offline';
+                      const StatusIcon = getStatusIcon(friendStatus);
+                      return (
+                        <div className="absolute -bottom-1 -right-1">
+                          <StatusIcon className={`h-3 w-3 ${getStatusColor(friendStatus)}`} />
+                        </div>
+                      );
+                    })()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-white font-medium truncate">{chat.display_name}</h4>
+                      {chat.lastMessage && (
+                        <span className="text-gray-400 text-xs flex-shrink-0 ml-2">
+                          {chat.lastMessage.timestamp?.toDate?.().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) || ''}
+                        </span>
+                      )}
+                    </div>
                     {chat.lastMessage && (
-                        const friendStatus = friendUID ? getUserStatus(friendUID) : 'offline';
-                        const StatusIcon = getStatusIcon(friendStatus);
-                        return (
-                          <div className="flex items-center">
-                            <StatusIcon className={`h-3 w-3 ${getStatusColor(friendStatus)}`} />
-                          </div>
-                        );
-                      })()}
                       <p className="text-gray-400 text-xs truncate">
                         {chat.lastMessage.text}
                       </p>
