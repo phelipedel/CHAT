@@ -2,14 +2,14 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { 
-  collection, 
-  addDoc, 
-  query, 
-  orderBy, 
-  onSnapshot, 
-  doc, 
-  updateDoc, 
+import {
+  collection,
+  addDoc,
+  query,
+  orderBy,
+  onSnapshot,
+  doc,
+  updateDoc,
   getDoc,
   serverTimestamp,
   where,
@@ -17,7 +17,8 @@ import {
   arrayUnion,
   arrayRemove,
   setDoc,
-  writeBatch
+  writeBatch,
+  deleteDoc
 } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { auth, db } from '@/lib/firebase';
@@ -37,11 +38,12 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { 
-  Send, 
-  LogOut, 
-  Settings, 
-  Shield, 
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import {
+  Send,
+  LogOut,
+  Settings,
+  Shield,
   Users,
   Image as ImageIcon,
   Save,
@@ -56,7 +58,10 @@ import {
   Search,
   Plus,
   Volume2,
-  VolumeX
+  VolumeX,
+  Edit,
+  MoreVertical,
+  Trash2
 } from 'lucide-react';
 import { ref, onValue, set, remove } from 'firebase/database';
 
@@ -141,7 +146,9 @@ export default function ChatPage() {
   const [showGroupModal, setShowGroupModal] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
-  
+  const [isEditingGroupName, setIsEditingGroupName] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+
   const [unreadCounts, setUnreadCounts] = useState<{ [chatId: string]: number }>({});
   const [sortedChats, setSortedChats] = useState<DisplayChat[]>([]);
 
@@ -176,7 +183,7 @@ export default function ChatPage() {
       }
     }
   }, [user]);
-  
+
   useEffect(() => {
     if (user && sortedChats.length > 0) {
       const unsubscribes = sortedChats.map(chat => {
@@ -764,6 +771,9 @@ export default function ChatPage() {
 
   const selectChat = (chat: DisplayChat) => {
     setSelectedChat(chat);
+    if (chat.isGroup) {
+      setNewGroupName(chat.name || '');
+    }
     if (unreadCounts[chat.id] > 0) {
       setUnreadCounts(prev => ({ ...prev, [chat.id]: 0 }));
     }
@@ -775,6 +785,31 @@ export default function ChatPage() {
       }
     } else {
       setSelectedFriend(null);
+    }
+  };
+
+  const handleUpdateGroupName = async () => {
+    if (!selectedChat || !newGroupName.trim()) return;
+
+    try {
+      await updateDoc(doc(db, 'chats', selectedChat.id), {
+        name: newGroupName.trim()
+      });
+      setIsEditingGroupName(false);
+    } catch (error) {
+      console.error("Erro ao atualizar nome do grupo:", error);
+    }
+  };
+
+  const handleDeleteConversation = async () => {
+    if (!selectedChat) return;
+    if (confirm('Tem certeza de que deseja excluir esta conversa? Esta ação não pode ser desfeita.')) {
+        try {
+            await deleteDoc(doc(db, 'chats', selectedChat.id));
+            setSelectedChat(null);
+        } catch (error) {
+            console.error("Erro ao excluir conversa:", error);
+        }
     }
   };
 
@@ -861,6 +896,7 @@ export default function ChatPage() {
                     <div className="flex-1">
                         <div className="flex items-center gap-2">
                             <h2 className="text-white font-semibold">{user?.displayName}</h2>
+                            <UserTags tags={user?.tags || []} />
                         </div>
                         <div className="flex items-center gap-1">
                             <Badge variant="secondary" className="text-xs bg-green-600 text-white">
@@ -907,7 +943,10 @@ export default function ChatPage() {
               </AvatarFallback>
             </Avatar>
             <div className="flex-1">
-              <h2 className="text-white font-semibold">{user?.displayName}</h2>
+              <div className="flex items-center gap-2">
+                  <h2 className="text-white font-semibold">{user?.displayName}</h2>
+                  <UserTags tags={user?.tags || []} />
+              </div>
               <div className="flex items-center gap-1">
                   <Badge variant="secondary" className="text-xs bg-green-600 text-white">{user?.userID}</Badge>
                   <Button variant="ghost" size="sm" onClick={copyUserID} className="h-6 w-6 p-0 text-gray-400 hover:text-white hover:bg-gray-700" title="Copiar ID">
@@ -926,7 +965,80 @@ export default function ChatPage() {
 
         {editingProfile && (
             <div className="p-4 border-b border-gray-700 bg-gray-800">
-                {/* Edit profile form */}
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-white text-sm font-medium">Editar Perfil</h3>
+              </div>
+              <div className="space-y-3">
+                <Input
+                  value={newDisplayName}
+                  onChange={(e) => setNewDisplayName(e.target.value)}
+                  placeholder="Nome de exibição"
+                  className="bg-gray-700 border-gray-600 text-white"
+                />
+                <Input
+                  value={newPhotoURL}
+                  onChange={(e) => setNewPhotoURL(e.target.value)}
+                  placeholder="URL da foto de perfil"
+                  className="bg-gray-700 border-gray-600 text-white"
+                />
+                <div className="space-y-2">
+                  <Label htmlFor="status-mode" className="text-white text-sm">
+                    Status de presença:
+                  </Label>
+                  <Select value={statusMode} onValueChange={(value: 'online' | 'offline' | 'hidden' | 'away') => setStatusMode(value)}>
+                    <SelectTrigger className="bg-gray-700 border-gray-600 text-white">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-gray-800 border-gray-600">
+                      <SelectItem value="online" className="text-white hover:bg-gray-700">
+                        <div className="flex items-center gap-2">
+                          <Circle className="h-3 w-3 fill-green-500 text-green-500" />
+                          Online
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="away" className="text-white hover:bg-gray-700">
+                        <div className="flex items-center gap-2">
+                          <Clock className="h-3 w-3 text-yellow-500" />
+                          Ausente
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="hidden" className="text-white hover:bg-gray-700">
+                        <div className="flex items-center gap-2">
+                          <Eye className="h-3 w-3 text-gray-500" />
+                          Oculto
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="offline" className="text-white hover:bg-gray-700">
+                        <div className="flex items-center gap-2">
+                          <Circle className="h-3 w-3 fill-gray-500 text-gray-500" />
+                          Offline
+                        </div>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    onClick={updateProfile}
+                    disabled={savingProfile}
+                    className="bg-white text-black hover:bg-gray-200"
+                  >
+                    <Save className="h-4 w-4 mr-1" />
+                    {savingProfile ? 'Salvando...' : 'Salvar'}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setEditingProfile(false)}
+                    disabled={savingProfile}
+                    className="border-gray-600 text-white hover:bg-gray-800"
+                  >
+                    <X className="h-4 w-4 mr-1" />
+                    Cancelar
+                  </Button>
+                </div>
+              </div>
             </div>
         )}
 
@@ -958,16 +1070,53 @@ export default function ChatPage() {
                     <AvatarFallback className="bg-gray-700 text-white">{selectedChat.display_name?.charAt(0)}</AvatarFallback>
                   </Avatar>
                   <div>
-                    <h2 className="text-white font-semibold">{selectedChat.display_name}</h2>
+                    {isEditingGroupName ? (
+                      <div className="flex items-center gap-2">
+                        <Input
+                          value={newGroupName}
+                          onChange={(e) => setNewGroupName(e.target.value)}
+                          className="bg-gray-700 border-gray-600 text-white h-8"
+                          onKeyPress={(e) => { if (e.key === 'Enter') handleUpdateGroupName(); }}
+                        />
+                        <Button onClick={handleUpdateGroupName} size="sm"><Check className="h-4 w-4"/></Button>
+                        <Button onClick={() => setIsEditingGroupName(false)} variant="ghost" size="sm"><X className="h-4 w-4"/></Button>
+                      </div>
+                    ) : (
+                      <h2 className="text-white font-semibold flex items-center gap-2">
+                        {selectedChat.display_name}
+                        {selectedChat.isGroup && (
+                          <Button onClick={() => setIsEditingGroupName(true)} variant="ghost" size="sm" className="text-gray-400 hover:text-white"><Edit className="h-4 w-4"/></Button>
+                        )}
+                      </h2>
+                    )}
                     {!selectedChat.isGroup && selectedFriend && (
                         <div className="flex items-center gap-2">
                           <p className="text-gray-400 text-sm">{selectedFriend.userID}</p>
-                          {/* Status Badge */}
+                          <UserTags tags={selectedFriend.tags || []} size="sm" />
                         </div>
                     )}
                   </div>
                 </div>
-                <Button variant="ghost" size="sm" onClick={() => setShowSearch(!showSearch)} className="text-gray-400 hover:text-white hover:bg-gray-800"><Search className="h-4 w-4" /></Button>
+                <div className="flex items-center gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => setShowSearch(!showSearch)} className="text-gray-400 hover:text-white hover:bg-gray-800"><Search className="h-4 w-4" /></Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="sm"><MoreVertical className="h-4 w-4" /></Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="bg-gray-800 border-gray-700 text-white">
+                      {selectedChat.isGroup && selectedChat.createdBy === user?.uid && (
+                        <DropdownMenuItem onSelect={handleDeleteConversation} className="text-red-400 hover:!bg-red-500/20">
+                          <Trash2 className="h-4 w-4 mr-2"/> Excluir Grupo
+                        </DropdownMenuItem>
+                      )}
+                      {!selectedChat.isGroup && (
+                          <DropdownMenuItem onSelect={handleDeleteConversation} className="text-red-400 hover:!bg-red-500/20">
+                            <Trash2 className="h-4 w-4 mr-2"/> Excluir Conversa
+                          </DropdownMenuItem>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </div>
               {showSearch && (
                   <div className="mt-3">
