@@ -1,843 +1,314 @@
+// Nova pasta (4)/app/(main)/page.tsx
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import {
-  collection,
-  addDoc,
-  query,
-  orderBy,
-  onSnapshot,
-  doc,
-  updateDoc,
-  getDoc,
-  serverTimestamp,
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { 
+  collection, 
+  query, 
+  orderBy, 
+  onSnapshot, 
+  addDoc, 
+  serverTimestamp, 
+  doc, 
+  getDoc, 
+  updateDoc, 
   where,
   getDocs,
   arrayUnion,
   arrayRemove,
-  setDoc,
-  writeBatch,
   deleteDoc
 } from 'firebase/firestore';
-import { signOut } from 'firebase/auth';
-import { auth, db } from '@/lib/firebase';
-import { isAdminUID } from '@/lib/config';
+import { ref, onValue } from 'firebase/database';
+import { auth, db, rtdb, setupUserPresence, updateUserStatus } from '@/lib/firebase';
 import { encryptMessage, decryptMessage } from '@/lib/encryption';
-import { setupUserPresence, rtdb, updateUserStatus } from '@/lib/firebase';
-import { generateUserID, isValidUserID } from '@/lib/utils';
-import { UserTags } from '@/components/ui/user-tags';
-import { MobileFriendsDrawer } from '@/components/ui/mobile-friends-drawer';
-import { MessageStatusIcon } from '@/components/ui/message-status-icon';
-import { ReactionPopover } from '@/components/ui/reaction-popover';
-import { ReactionPills } from '@/components/ui/reaction-pills';
-import { GroupChatModal } from '@/components/ui/group-chat-modal';
+import { isValidUserID } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Card, CardContent } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import {
-  Send,
-  LogOut,
-  Settings,
-  Shield,
-  Users,
-  Image as ImageIcon,
+import { 
+  MessageCircle, 
+  Send, 
+  Settings, 
+  LogOut, 
+  UserPlus, 
+  Users, 
+  X, 
   Save,
-  X,
-  UserPlus,
-  MessageCircle,
-  Copy,
-  Check,
   Circle,
   Clock,
   Eye,
-  Search,
-  Plus,
-  Volume2,
-  VolumeX,
+  Trash2,
   Edit,
-  MoreVertical,
-  Trash2
+  Camera,
+  Check,
+  Search
 } from 'lucide-react';
-import { ref, onValue, set, remove } from 'firebase/database';
-
-// Interfaces
-interface Message {
-  id: string;
-  text: string;
-  userId: string;
-  userName: string;
-  userPhoto: string;
-  timestamp: any;
-  isImage?: boolean;
-  chatId: string;
-  readBy?: string[];
-  reactions?: { [emoji: string]: string[] };
-}
+import { useToast } from '@/hooks/use-toast';
+import { UserTags } from '@/components/ui/user-tags';
+import { Switch } from '@/components/ui/switch';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 interface User {
   uid: string;
-  email: string;
   displayName: string;
+  email: string;
   photoURL: string;
-  isAdmin: boolean;
   userID: string;
   friends: string[];
-  tags?: string[];
+  isAdmin?: boolean;
   statusMode?: 'online' | 'offline' | 'hidden' | 'away';
-}
-
-interface Friend {
-  uid: string;
-  userID: string;
-  displayName: string;
-  photoURL: string;
-  status?: 'online' | 'offline' | 'hidden' | 'away';
+  status?: string;
   lastSeen?: any;
   tags?: string[];
-  lastMessage?: string;
-  lastMessageTime?: any;
 }
 
-interface Chat {
+interface Message {
   id: string;
-  name?: string;
-  members: string[];
-  isGroup: boolean;
-  lastMessage?: {
-    text: string;
-    timestamp: any;
-    sender: string;
-  };
-  createdBy: string;
-  photoURL?: string;
+  text: string;
+  senderId: string;
+  receiverId?: string;
+  groupId?: string;
+  timestamp: any;
+  senderName: string;
+  senderPhoto: string;
 }
 
-// Interface enriquecida para exibição na UI
-interface DisplayChat extends Chat {
-  display_name: string;
-  display_photo: string;
+interface Group {
+  id: string;
+  name: string;
+  photoURL: string;
+  members: string[];
+  createdBy: string;
+  createdAt: any;
 }
 
 export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [filteredMessages, setFilteredMessages] = useState<Message[]>([]);
-  const [newMessage, setNewMessage] = useState('');
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [friends, setFriends] = useState<User[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [selectedChat, setSelectedChat] = useState<{type: 'friend' | 'group', id: string, name: string, photo: string} | null>(null);
+  const [addFriendID, setAddFriendID] = useState('');
+  const [showConnectionsModal, setShowConnectionsModal] = useState(false);
+  const [groupName, setGroupName] = useState('');
+  const [groupPhotoURL, setGroupPhotoURL] = useState('https://images.unsplash.com/photo-1522202176988-66273c2fd55f?w=150&h=150&fit=crop&crop=center');
+  const [selectedFriendsForGroup, setSelectedFriendsForGroup] = useState<string[]>([]);
   const [editingProfile, setEditingProfile] = useState(false);
   const [newDisplayName, setNewDisplayName] = useState('');
   const [newPhotoURL, setNewPhotoURL] = useState('');
-  const [friends, setFriends] = useState<Friend[]>([]);
-  const [selectedChat, setSelectedChat] = useState<DisplayChat | null>(null);
-  const [selectedFriend, setSelectedFriend] = useState<Friend | null>(null);
-  const [newFriendID, setNewFriendID] = useState('');
-  const [addingFriend, setAddingFriend] = useState(false);
-  const [copiedUserID, setCopiedUserID] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [statusMode, setStatusMode] = useState<'online' | 'offline' | 'hidden' | 'away'>('online');
-  const [isFriendTyping, setIsFriendTyping] = useState(false);
+  const [userStatuses, setUserStatuses] = useState<{[key: string]: {state: string, last_changed: any}}>({});
+  const [onlineMembers, setOnlineMembers] = useState<{[key: string]: number}>({});
+  const [editingGroupDetails, setEditingGroupDetails] = useState<{ id: string, name: string, photoURL: string } | null>(null);
+  const [newGroupPhotoName, setNewGroupPhotoName] = useState('');
+  const [newGroupPhotoURL, setNewGroupPhotoURL] = useState('');
+  const [isMuted, setIsMuted] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [showSearch, setShowSearch] = useState(false);
-  const [showGroupModal, setShowGroupModal] = useState(false);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
-  const [soundEnabled, setSoundEnabled] = useState(true);
-  const [isEditingGroupName, setIsEditingGroupName] = useState(false);
-  const [newGroupName, setNewGroupName] = useState('');
-
-  const [unreadCounts, setUnreadCounts] = useState<{ [chatId: string]: number }>({});
-  const [sortedChats, setSortedChats] = useState<DisplayChat[]>([]);
-  const [onlineUsers, setOnlineUsers] = useState<{ [uid: string]: { status: string; lastSeen: any } }>({});
-  const [groupOnlineCount, setGroupOnlineCount] = useState(0);
-  const [statusTimeouts, setStatusTimeouts] = useState<{ [uid: string]: NodeJS.Timeout }>({});
-
+  const [showSearchInput, setShowSearchInput] = useState(false);
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const router = useRouter();
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const { toast } = useToast();
 
-  const sortChatsByActivity = (chatsToSort: DisplayChat[]) => {
-    return [...chatsToSort].sort((a, b) => {
-      const aTimestamp = a.lastMessage?.timestamp?.toMillis() || 0;
-      const bTimestamp = b.lastMessage?.timestamp?.toMillis() || 0;
-      return bTimestamp - aTimestamp;
-    });
+  // Inicializar áudio de notificação
+  useEffect(() => {
+    audioRef.current = new Audio('/notifi/notification.mp3');
+    audioRef.current.volume = 0.5;
+  }, []);
+
+  // Função para tocar som de notificação
+  const playNotificationSound = () => {
+    if (audioRef.current) {
+      audioRef.current.currentTime = 0;
+      audioRef.current.play().catch(console.error);
+    }
   };
 
   useEffect(() => {
-    const currentUser = auth.currentUser;
-    if (currentUser) {
-      loadUserData(currentUser.uid);
-    } else {
-      router.push('/login');
-    }
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+        if (userDoc.exists()) {
+          const userData = { uid: firebaseUser.uid, ...userDoc.data() } as User;
+          setUser(userData);
+          setNewDisplayName(userData.displayName);
+          setNewPhotoURL(userData.photoURL);
+          setStatusMode(userData.statusMode || 'online');
+          
+          // Configurar presença do usuário
+          setupUserPresence(firebaseUser.uid, userData.statusMode || 'online');
+        }
+      } else {
+        router.push('/login');
+      }
+    });
+
+    return () => unsubscribe();
   }, [router]);
 
+  // Monitorar status de todos os usuários
   useEffect(() => {
-    if (user) {
-      const unsubscribePromise = loadChats();
-      setupUserPresence(user.uid, statusMode);
-      requestNotificationPermission();
-      setupOnlineUsersListener();
-      return () => {
-        unsubscribePromise.then(unsub => unsub && unsub());
+    const statusRef = ref(rtdb, 'status');
+    const unsubscribe = onValue(statusRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setUserStatuses(snapshot.val());
       }
-    }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Calcular membros online para grupos
+  useEffect(() => {
+    const newOnlineMembers: {[key: string]: number} = {};
+    
+    groups.forEach(group => {
+      let onlineCount = 0;
+      group.members.forEach(memberId => {
+        const status = userStatuses[memberId];
+        if (status && status.state === 'online') {
+          onlineCount++;
+        }
+      });
+      newOnlineMembers[group.id] = onlineCount;
+    });
+    
+    setOnlineMembers(newOnlineMembers);
+  }, [groups, userStatuses]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const friendsQuery = query(
+      collection(db, 'users'),
+      where('__name__', 'in', user.friends.length > 0 ? user.friends : ['dummy'])
+    );
+
+    const unsubscribe = onSnapshot(friendsQuery, (snapshot) => {
+      const friendsData = snapshot.docs.map(doc => ({
+        uid: doc.id,
+        ...doc.data()
+      })) as User[];
+      setFriends(friendsData);
+    });
+
+    return () => unsubscribe();
   }, [user]);
 
   useEffect(() => {
-    if (selectedChat && selectedChat.isGroup && user) {
-      updateGroupOnlineCount();
-    }
-  }, [selectedChat, onlineUsers, user]);
-
-  useEffect(() => {
-    if (user && sortedChats.length > 0) {
-      const unsubscribes = sortedChats.map(chat => {
-        const q = query(
-          collection(db, 'messages'),
-          where('chatId', '==', chat.id)
-        );
-        return onSnapshot(q, (messageSnapshot) => {
-          if (!user) return;
-          const count = messageSnapshot.docs.filter(
-            doc => !doc.data().readBy?.includes(user.uid)
-          ).length;
-          
-          setUnreadCounts(prevCounts => ({
-            ...prevCounts,
-            [chat.id]: count,
-          }));
-        });
-      });
-  
-      return () => unsubscribes.forEach(unsub => unsub());
-    }
-  }, [user, sortedChats]);
-
-  useEffect(() => {
-    if (user) {
-      updateUserStatus(user.uid, statusMode);
-    }
-  }, [statusMode, user]);
-
-  useEffect(() => {
-    if (selectedChat && user) {
-      const unsubscribe = loadMessages();
-      return () => {
-        if (unsubscribe) {
-          unsubscribe();
-        }
-      };
-    }
-  }, [selectedChat, user]);
-
-  useEffect(() => {
-    if (selectedFriend?.uid) {
-      const statusRef = ref(rtdb, `/status/${selectedFriend.uid}`);
-      const unsubscribe = onValue(statusRef, (snapshot) => {
-        if (snapshot.exists()) {
-          const status = snapshot.val();
-          setSelectedFriend(currentFriend => currentFriend ? ({
-            ...currentFriend,
-            status: status.state || 'offline',
-            lastSeen: status.last_changed
-          }) : null);
-        }
-      });
-      return () => unsubscribe();
-    }
-  }, [selectedFriend?.uid]);
-
-  useEffect(() => {
-    if (selectedChat && user && selectedFriend) {
-      const chatId = selectedChat.isGroup ? selectedChat.id : [user.uid, selectedFriend.uid].sort().join('_');
-      const typingRef = ref(rtdb, `/typing/${chatId}`);
-      
-      const unsubscribe = onValue(typingRef, (snapshot) => {
-        if (snapshot.exists()) {
-          const typingData = snapshot.val();
-          const isTyping = Object.keys(typingData).some(uid => uid !== user.uid && typingData[uid] === true);
-          setIsFriendTyping(isTyping);
-        } else {
-          setIsFriendTyping(false);
-        }
-      });
-      
-      return () => unsubscribe();
-    }
-  }, [selectedChat, user, selectedFriend]);
-
-  useEffect(() => {
-    if (searchQuery.trim() === '') {
-      setFilteredMessages(messages);
-    } else {
-      const filtered = messages.filter(msg => 
-        msg.text.toLowerCase().includes(searchQuery.toLowerCase())
-      );
-      setFilteredMessages(filtered);
-    }
-  }, [searchQuery, messages]);
-
-  const setupOnlineUsersListener = () => {
     if (!user) return;
 
-    const statusRef = ref(rtdb, '/status');
-    const unsubscribe = onValue(statusRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const statusData = snapshot.val();
-        
-        // Process status changes with timing logic
-        setOnlineUsers(prevUsers => {
-          const newUsers = { ...prevUsers };
-          
-          Object.keys(statusData).forEach(uid => {
-            const currentStatus = statusData[uid];
-            const previousStatus = prevUsers[uid];
-            
-            // Clear any existing timeout for this user
-            if (statusTimeouts[uid]) {
-              clearTimeout(statusTimeouts[uid]);
-              setStatusTimeouts(prev => {
-                const newTimeouts = { ...prev };
-                delete newTimeouts[uid];
-                return newTimeouts;
-              });
-            }
-            
-            // If user just went from online to offline, set a 1-minute delay
-            if (previousStatus?.status === 'online' && currentStatus.state === 'offline') {
-              // Keep showing as online for 1 minute
-              newUsers[uid] = { ...previousStatus };
-              
-              // Set timeout to change to offline after 1 minute
-              const timeoutId = setTimeout(() => {
-                setOnlineUsers(prev => ({
-                  ...prev,
-                  [uid]: currentStatus
-                }));
-                setStatusTimeouts(prev => {
-                  const newTimeouts = { ...prev };
-                  delete newTimeouts[uid];
-                  return newTimeouts;
-                });
-              }, 60000); // 1 minute
-              
-              setStatusTimeouts(prev => ({
-                ...prev,
-                [uid]: timeoutId
-              }));
-            } else if (currentStatus.state === 'online') {
-              // Immediately show online status
-              newUsers[uid] = currentStatus;
-            } else if (currentStatus.state === 'away') {
-              // Keep away status as is, don't change it
-              newUsers[uid] = currentStatus;
-            } else {
-              // For other status changes, update immediately
-              newUsers[uid] = currentStatus;
-            }
-          });
-          
-          return newUsers;
-        });
-      }
-    });
-
-    return unsubscribe;
-  };
-
-  const updateGroupOnlineCount = () => {
-    if (!selectedChat || !selectedChat.isGroup || !user) return;
-
-    const onlineCount = selectedChat.members.filter(memberId => {
-      if (memberId === user.uid) return true; // Current user is always counted as online
-      const memberStatus = onlineUsers[memberId];
-      return memberStatus && memberStatus.status === 'online';
-    }).length;
-
-    setGroupOnlineCount(onlineCount);
-  };
-
-  const getUserStatus = (userId: string) => {
-    const userStatus = onlineUsers[userId];
-    if (!userStatus) return 'offline';
-    return userStatus.status || 'offline';
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'online': return 'text-green-500 fill-green-500 bg-green-500';
-      case 'away': return 'text-yellow-500 fill-yellow-500 bg-yellow-500';
-      case 'hidden': return 'text-gray-500 fill-gray-500 bg-gray-500';
-      default: return 'text-gray-500 fill-gray-500 bg-gray-500';
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'online': return Circle;
-      case 'away': return Clock;
-      case 'hidden': return Eye;
-      default: return Circle;
-    }
-  };
-
-  useEffect(() => {
-    if (messages.length > 0 && user && selectedChat) {
-      const unreadMessages = messages.filter(msg => 
-        msg.userId !== user.uid && 
-        (!msg.readBy || !msg.readBy.includes(user.uid))
-      );
-
-      if (unreadMessages.length > 0) {
-        const batch = writeBatch(db);
-        unreadMessages.forEach(msg => {
-          const msgRef = doc(db, 'messages', msg.id);
-          batch.update(msgRef, {
-            readBy: arrayUnion(user.uid)
-          });
-        });
-        batch.commit().catch(console.error);
-      }
-    }
-  }, [messages, user, selectedChat]);
-
-  const requestNotificationPermission = async () => {
-    if ('Notification' in window) {
-      const permission = await Notification.requestPermission();
-      setNotificationsEnabled(permission === 'granted');
-    }
-  };
-
-  const playNotificationSound = () => {
-    if (soundEnabled) {
-      const audio = new Audio('/notifi/new-notification.mp3');
-      audio.play().catch(console.error);
-    }
-  };
-
-  const showSystemNotification = (title: string, options: NotificationOptions) => {
-    if (notificationsEnabled && 'serviceWorker' in navigator) {
-      navigator.serviceWorker.ready.then(registration => {
-        registration.showNotification(title, options);
-      });
-    }
-  };
-
-  const loadUserData = async (userId: string) => {
-    try {
-      const userDoc = await getDoc(doc(db, 'users', userId));
-      const isUserAdmin = isAdminUID(userId);
-      
-      if (userDoc.exists()) {
-        const userData = userDoc.data();
-        let userID = userData.userID;
-        if (!userID) {
-          userID = generateUserID();
-          await updateDoc(doc(db, 'users', userId), { userID });
-        }
-        
-        setUser({
-          uid: userId,
-          email: userData.email,
-          displayName: userData.displayName,
-          photoURL: userData.photoURL,
-          isAdmin: isUserAdmin,
-          userID: userID,
-          friends: userData.friends || [],
-          tags: userData.tags || [],
-          statusMode: userData.statusMode || 'online'
-        });
-        setNewDisplayName(userData.displayName);
-        setNewPhotoURL(userData.photoURL);
-        setStatusMode(userData.statusMode || 'online');
-      } else {
-        const currentUser = auth.currentUser;
-        if (currentUser) {
-          const userID = generateUserID();
-          const newUserData = {
-            email: currentUser.email || '',
-            displayName: currentUser.displayName || 'Usuário',
-            photoURL: currentUser.photoURL || 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&h=150&fit=crop&crop=face',
-            isAdmin: isUserAdmin,
-            createdAt: new Date(),
-            userID: userID,
-            friends: [],
-            tags: [],
-            statusMode: 'online'
-          };
-          
-          await setDoc(doc(db, 'users', userId), newUserData);
-          
-          setUser({
-            uid: userId,
-            ...newUserData
-          });
-          setNewDisplayName(newUserData.displayName);
-          setNewPhotoURL(newUserData.photoURL);
-        }
-      }
-    } catch (error) {
-      console.error('Erro ao carregar dados do usuário:', error);
-    }
-    setLoading(false);
-  };
-  
-  const loadChats = async () => {
-    if (!user) return;
-
-    const userDoc = await getDoc(doc(db, 'users', user.uid));
-    const friendsUIDs = userDoc.data()?.friends || [];
-    const friendsPromises = friendsUIDs.map((uid: string) => getDoc(doc(db, 'users', uid)));
-    const friendDocs = await Promise.all(friendsPromises);
-    const friendsData = friendDocs.filter(doc => doc.exists()).map(doc => ({ uid: doc.id, ...doc.data() } as Friend));
-    setFriends(friendsData);
-    
-    const q = query(
-      collection(db, 'chats'),
+    const groupsQuery = query(
+      collection(db, 'groups'),
       where('members', 'array-contains', user.uid)
     );
-    
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const chatPromises = snapshot.docs.map(async (docSnap) => {
-        const chatData = { id: docSnap.id, ...docSnap.data() } as Chat;
-        let displayName = 'Grupo';
-        let displayPhoto = 'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?w=150&h=150&fit=crop&crop=face';
 
-        if (!chatData.isGroup) {
-          const otherUserId = chatData.members.find(uid => uid !== user.uid);
-          displayName = "Chat Privado"; // Nome padrão
-          if (otherUserId) {
-            try {
-              const friend = friendsData.find(f => f.uid === otherUserId);
-              if (friend) {
-                displayName = friend.displayName;
-                displayPhoto = friend.photoURL;
-              } else {
-                const otherUserDoc = await getDoc(doc(db, 'users', otherUserId));
-                if (otherUserDoc.exists()) {
-                    const otherUserData = otherUserDoc.data();
-                    displayName = otherUserData.displayName;
-                    displayPhoto = otherUserData.photoURL;
-                }
-              }
-            } catch (e) { console.error("Erro ao buscar dados do amigo:", e); }
-          }
-        } else {
-          displayName = chatData.name || 'Grupo sem nome';
-          if (chatData.photoURL) displayPhoto = chatData.photoURL;
-        }
-
-        return {
-          ...chatData,
-          display_name: displayName,
-          display_photo: displayPhoto,
-        } as DisplayChat;
-      });
-
-      const resolvedChats = await Promise.all(chatPromises);
-      const sorted = sortChatsByActivity(resolvedChats);
-      setSortedChats(sorted);
+    const unsubscribe = onSnapshot(groupsQuery, (snapshot) => {
+      const groupsData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Group[];
+      setGroups(groupsData);
     });
 
-    return unsubscribe;
-  };
+    return () => unsubscribe();
+  }, [user]);
 
-  const loadMessages = () => {
-    if (!selectedChat || !user) return undefined;
+  // Efeito principal para mensagens com reordenação e notificação
+  useEffect(() => {
+    if (!selectedChat || !user) return;
 
-    const chatId = selectedChat.id;
-    const q = query(
-      collection(db, 'messages'), 
-      where('chatId', '==', chatId),
-      orderBy('timestamp', 'asc')
-    );
-    
-    return onSnapshot(q, (snapshot) => {
-      const loadedMessages: Message[] = [];
-      
-      snapshot.forEach((doc) => {
-        const data = doc.data();
-        const message = {
-          id: doc.id,
-          text: selectedChat.isGroup ? data.text : decryptMessage(data.text, data.userId, user.uid === data.userId ? selectedFriend?.uid || '' : user.uid),
-          userId: data.userId,
-          userName: data.userName,
-          userPhoto: data.userPhoto,
-          timestamp: data.timestamp,
-          isImage: data.isImage || false,
-          chatId: data.chatId,
-          readBy: data.readBy || [],
-          reactions: data.reactions || {}
-        };
-        loadedMessages.push(message);
-      });
-      
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === 'added') {
-          const data = change.doc.data();
-          const message = loadedMessages.find(m => m.id === change.doc.id);
-          if (message && data.userId !== user.uid && !document.hasFocus()) {
-            playNotificationSound();
-            showSystemNotification(`Nova mensagem de ${data.userName}`, {
-              body: message.text,
-              icon: data.userPhoto,
-              tag: chatId
-            });
-          }
-        }
-      });
-      
-      loadedMessages.sort((a, b) => {
-        return (a.timestamp?.toMillis() || 0) - (b.timestamp?.toMillis() || 0);
-      });
-      
-      setMessages(loadedMessages);
-      scrollToBottom();
-    }, (error) => {
-      console.error("Erro no listener do onSnapshot: ", error);
-    });
-  };
-
-  const handleTyping = () => {
-    if (!selectedChat || !user || !selectedFriend) return;
-
-    const chatId = selectedChat.id;
-    const typingRef = ref(rtdb, `/typing/${chatId}/${user.uid}`);
-
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-    }
-
-    set(typingRef, true);
-
-    typingTimeoutRef.current = setTimeout(() => {
-      remove(typingRef);
-    }, 2000);
-  };
-  
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  const sendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newMessage.trim() || !user || !selectedChat) return;
-  
-    const isImageUrl = newMessage.match(/\.(jpeg|jpg|gif|png|webp|svg)$/i) || 
-                       newMessage.includes('images.unsplash.com') ||
-                       newMessage.includes('via.placeholder.com');
-  
-    const chatId = selectedChat.id;
-  
-    try {
-      const messageText = selectedChat.isGroup ? newMessage : encryptMessage(newMessage, user.uid, selectedFriend?.uid || '');
-      
-      await addDoc(collection(db, 'messages'), {
-        text: messageText,
-        userId: user.uid,
-        userName: user.displayName,
-        userPhoto: user.photoURL,
-        timestamp: serverTimestamp(),
-        isImage: Boolean(isImageUrl),
-        chatId: chatId,
-        readBy: [user.uid],
-        reactions: {}
-      });
-  
-      await updateDoc(doc(db, 'chats', chatId), {
-        lastMessage: {
-          text: newMessage,
-          timestamp: serverTimestamp(),
-          sender: user.uid
-        }
-      });
-  
-      setNewMessage('');
-      
-      if (typingTimeoutRef.current) {
-        clearTimeout(typingTimeoutRef.current);
-      }
-      if (selectedFriend) {
-        const typingRef = ref(rtdb, `/typing/${chatId}/${user.uid}`);
-        remove(typingRef);
-      }
-    } catch (error) {
-      console.error('Erro ao enviar mensagem:', error);
-    }
-  };
-
-  const handleReaction = async (message: Message, emoji: string) => {
-    if (!user) return;
-
-    try {
-      const messageRef = doc(db, 'messages', message.id);
-      const currentReactions = message.reactions || {};
-      const userReactions = Object.keys(currentReactions).filter(e => 
-        currentReactions[e].includes(user.uid)
+    let messagesQuery;
+    if (selectedChat.type === 'friend') {
+      messagesQuery = query(
+        collection(db, 'messages'),
+        where('participants', 'array-contains', user.uid),
+        orderBy('timestamp', 'asc')
       );
+    } else {
+      messagesQuery = query(
+        collection(db, 'messages'),
+        where('groupId', '==', selectedChat.id),
+        orderBy('timestamp', 'asc')
+      );
+    }
 
-      const batch = writeBatch(db);
+    const unsubscribe = onSnapshot(messagesQuery, (snapshot) => {
+      let incomingMessageFromOthersDetected = false;
+      let chatToReorderId: string | null = null;
+      let chatType: 'friend' | 'group' | null = null;
 
-      userReactions.forEach(reactionEmoji => {
-        if (reactionEmoji !== emoji) {
-          batch.update(messageRef, {
-            [`reactions.${reactionEmoji}`]: arrayRemove(user.uid)
-          });
+      snapshot.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const newMessageDoc = change.doc.data() as Message;
+          if (newMessageDoc.senderId !== user.uid) { // Mensagem nova e de outro usuário
+            incomingMessageFromOthersDetected = true;
+            chatToReorderId = newMessageDoc.receiverId || newMessageDoc.groupId || null;
+            chatType = newMessageDoc.receiverId ? 'friend' : (newMessageDoc.groupId ? 'group' : null);
+
+            // Tocar som e exibir toast para esta nova mensagem específica
+            if (!isMuted) {
+              playNotificationSound();
+              const notificationText = chatType === 'friend'
+                ? decryptMessage(newMessageDoc.text, newMessageDoc.senderId, user.uid)
+                : newMessageDoc.text;
+              toast({
+                title: `Nova mensagem de ${newMessageDoc.senderName}`,
+                description: notificationText.length > 50 ? notificationText.substring(0, 50) + '...' : notificationText,
+              });
+            }
+          }
         }
       });
 
-      const currentEmojiReactions = currentReactions[emoji] || [];
-      if (currentEmojiReactions.includes(user.uid)) {
-        batch.update(messageRef, {
-          [`reactions.${emoji}`]: arrayRemove(user.uid)
-        });
-      } else {
-        batch.update(messageRef, {
-          [`reactions.${emoji}`]: arrayUnion(user.uid)
-        });
+      const chatSpecificMessages = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Message[];
+
+      setMessages(chatSpecificMessages); // Sempre atualiza o estado das mensagens
+
+      // Reordenar lista de amigos/grupos se alguma nova mensagem de outros foi detectada
+      if (incomingMessageFromOthersDetected && chatToReorderId && chatType) {
+          if (chatType === 'friend') {
+              setFriends(prevFriends => {
+                  const friendToMove = prevFriends.find(f => f.uid === chatToReorderId);
+                  if (friendToMove) {
+                      const filtered = prevFriends.filter(f => f.uid !== chatToReorderId);
+                      return [friendToMove, ...filtered]; // Move para o topo
+                  }
+                  return prevFriends;
+              });
+          } else if (chatType === 'group') {
+              setGroups(prevGroups => {
+                  const groupToMove = prevGroups.find(g => g.id === chatToReorderId);
+                  if (groupToMove) {
+                      const filtered = prevGroups.filter(g => g.id !== chatToReorderId);
+                      return [groupToMove, ...filtered]; // Move para o topo
+                  }
+                  return prevGroups;
+              });
+          }
       }
+    });
 
-      await batch.commit();
-    } catch (error) {
-      console.error('Erro ao adicionar reação:', error);
-    }
-  };
+    // Dependências mínimas e corretas para o onSnapshot
+    return () => unsubscribe();
+  }, [selectedChat, user, toast, isMuted]); 
 
-  const createGroupChat = async (selectedFriendsUids: string[], groupName: string) => {
-    if (!user) return;
-
-    try {
-      const members = [user.uid, ...selectedFriendsUids];
-      await addDoc(collection(db, 'chats'), {
-        name: groupName,
-        members,
-        isGroup: true,
-        createdBy: user.uid,
-        photoURL: 'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?w=150&h=150&fit=crop&crop=face',
-        lastMessage: null
-      });
-      setShowGroupModal(false);
-    } catch (error) {
-      console.error('Erro ao criar grupo:', error);
-    }
-  };
-
-  const addFriend = async () => {
-    if (!newFriendID.trim() || !user) return;
-
-    if (!isValidUserID(newFriendID)) {
-      alert('ID inválido! Use o formato: del#1234');
-      return;
-    }
-
-    setAddingFriend(true);
-
-    try {
-      const q = query(collection(db, 'users'), where('userID', '==', newFriendID));
-      const querySnapshot = await getDocs(q);
-      
-      if (querySnapshot.empty) {
-        alert('Usuário não encontrado!');
-        setAddingFriend(false);
-        return;
-      }
-
-      const friendDoc = querySnapshot.docs[0];
-      const friendUID = friendDoc.id;
-      const friendData = friendDoc.data();
-
-      if (friendUID === user.uid) {
-        alert("Você não pode adicionar a si mesmo!");
-        setAddingFriend(false);
-        return;
-      }
-      
-      if (user.friends.includes(friendUID)) {
-        alert('Este usuário já está na sua lista de amigos!');
-        setAddingFriend(false);
-        return;
-      }
-
-      await updateDoc(doc(db, 'users', user.uid), {
-        friends: arrayUnion(friendUID)
-      });
-
-      await updateDoc(doc(db, 'users', friendUID), {
-        friends: arrayUnion(user.uid)
-      });
-      
-      const sortedMembers = [user.uid, friendUID].sort();
-      const chatsQuery = query(collection(db, 'chats'), where('isGroup', '==', false), where('members', '==', sortedMembers));
-      const chatsSnapshot = await getDocs(chatsQuery);
-      
-      if (chatsSnapshot.empty) {
-        await addDoc(collection(db, 'chats'), {
-          members: sortedMembers,
-          isGroup: false,
-          createdBy: user.uid,
-          lastMessage: null
-        });
-      }
-      
-      setFriends(prev => [...prev, { uid: friendUID, ...friendData } as Friend]);
-
-      setUser(prevUser => prevUser ? ({
-        ...prevUser,
-        friends: [...prevUser.friends, friendUID]
-      }) : null);
-
-      setNewFriendID('');
-      alert(`${friendData.displayName} foi adicionado como amigo!`);
-    } catch (error) {
-      console.error('Erro ao adicionar amigo:', error);
-      alert('Erro ao adicionar amigo. Tente novamente.');
-    }
-    setAddingFriend(false);
-  };
-
-  const removeFriend = async (friendUID: string) => {
-    if (!user) return;
-
-    if (confirm('Tem certeza que deseja remover este amigo?')) {
-      try {
-        await updateDoc(doc(db, 'users', user.uid), {
-          friends: arrayRemove(friendUID)
-        });
-
-        await updateDoc(doc(db, 'users', friendUID), {
-          friends: arrayRemove(user.uid)
-        });
-
-        setUser(prevUser => prevUser ? ({
-          ...prevUser,
-          friends: prevUser.friends.filter(f => f !== friendUID)
-        }) : null);
-
-        setFriends(prev => prev.filter(f => f.uid !== friendUID));
-        if(selectedFriend?.uid === friendUID) {
-          setSelectedChat(null);
-          setSelectedFriend(null);
-        }
-        
-      } catch (error) {
-        console.error('Erro ao remover amigo:', error);
-      }
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      router.push('/login');
-    } catch (error) {
-      console.error('Erro ao fazer logout:', error);
-    }
-  };
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   const updateProfile = async () => {
     if (!user) return;
@@ -849,13 +320,16 @@ export default function ChatPage() {
         photoURL: newPhotoURL,
         statusMode: statusMode,
       });
-      
-      setUser(prevUser => prevUser ? ({
-        ...prevUser,
+
+      // Atualizar status de presença
+      await updateUserStatus(user.uid, statusMode);
+
+      setUser({
+        ...user,
         displayName: newDisplayName,
         photoURL: newPhotoURL,
         statusMode: statusMode,
-      }) : null);
+      });
       setEditingProfile(false);
     } catch (error) {
       console.error('Erro ao atualizar perfil:', error);
@@ -864,462 +338,818 @@ export default function ChatPage() {
     setSavingProfile(false);
   };
 
-  const copyUserID = async () => {
-    if (!user?.userID) return;
-    
-    try {
-      await navigator.clipboard.writeText(user.userID);
-      setCopiedUserID(true);
-      setTimeout(() => setCopiedUserID(false), 2000);
-    } catch (error) {
-      const textArea = document.createElement('textarea');
-      textArea.value = user.userID;
-      document.body.appendChild(textArea);
-      textArea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textArea);
-      setCopiedUserID(true);
-      setTimeout(() => setCopiedUserID(false), 2000);
+  // Função para atualizar detalhes do grupo (nome e foto)
+  const updateGroupDetails = async () => {
+    if (!editingGroupDetails || !newGroupPhotoName.trim() || !newGroupPhotoURL.trim()) {
+      alert('Nome e URL da foto não podem estar vazios.');
+      return;
     }
-  };
-
-  const selectChat = (chat: DisplayChat) => {
-    setSelectedChat(chat);
-    if (chat.isGroup) {
-      setNewGroupName(chat.name || '');
-    }
-    if (unreadCounts[chat.id] > 0) {
-      setUnreadCounts(prev => ({ ...prev, [chat.id]: 0 }));
-    }
-    if (!chat.isGroup) {
-      const friendUID = chat.members.find(uid => uid !== user?.uid);
-      const friendData = friends.find(f => f.uid === friendUID);
-      if(friendData) {
-        setSelectedFriend(friendData);
-      }
-    } else {
-      setSelectedFriend(null);
-    }
-  };
-
-  const handleUpdateGroupName = async () => {
-    if (!selectedChat || !newGroupName.trim()) return;
 
     try {
-      await updateDoc(doc(db, 'chats', selectedChat.id), {
-        name: newGroupName.trim()
+      await updateDoc(doc(db, 'groups', editingGroupDetails.id), {
+        name: newGroupPhotoName,
+        photoURL: newGroupPhotoURL
       });
-      setIsEditingGroupName(false);
+      
+      setEditingGroupDetails(null);
+      setNewGroupPhotoName('');
+      setNewGroupPhotoURL('');
     } catch (error) {
-      console.error("Erro ao atualizar nome do grupo:", error);
+      console.error('Erro ao atualizar grupo:', error);
+      alert('Erro ao atualizar grupo. Por favor, tente novamente.');
     }
   };
 
-  const handleDeleteConversation = async () => {
-    if (!selectedChat) return;
-    if (confirm('Tem certeza de que deseja excluir esta conversa? Esta ação não pode ser desfeita.')) {
-        try {
-            await deleteDoc(doc(db, 'chats', selectedChat.id));
-            setSelectedChat(null);
-        } catch (error) {
-            console.error("Erro ao excluir conversa:", error);
+  const sendMessage = async () => {
+    if (!newMessage.trim() || !selectedChat || !user) return;
+
+    try {
+      const messageData: any = {
+        text: selectedChat.type === 'friend' 
+          ? encryptMessage(newMessage, user.uid, selectedChat.id)
+          : newMessage, // Mensagens de grupo não são criptografadas por este painel
+        senderId: user.uid,
+        senderName: user.displayName,
+        senderPhoto: user.photoURL,
+        timestamp: serverTimestamp(),
+      };
+
+      if (selectedChat.type === 'friend') {
+        messageData.receiverId = selectedChat.id;
+        messageData.participants = [user.uid, selectedChat.id];
+      } else {
+        messageData.groupId = selectedChat.id;
+      }
+
+      await addDoc(collection(db, 'messages'), messageData);
+      setNewMessage('');
+    } catch (error) {
+      console.error('Erro ao enviar mensagem:', error);
+      alert('Erro ao enviar mensagem. Por favor, verifique sua conexão ou as permissões.');
+    }
+  };
+
+  const addFriend = async () => {
+    if (!addFriendID.trim() || !user || !isValidUserID(addFriendID)) {
+      alert('ID inválido. Use o formato correto (ex: del#1234)');
+      return;
+    }
+
+    try {
+      const usersQuery = query(collection(db, 'users'), where('userID', '==', addFriendID));
+      const querySnapshot = await getDocs(usersQuery);
+      
+      if (querySnapshot.empty) {
+        alert('Usuário não encontrado');
+        return;
+      }
+
+      const friendDoc = querySnapshot.docs[0];
+      const friendId = friendDoc.id;
+
+      if (friendId === user.uid) {
+        alert('Você não pode adicionar a si mesmo');
+        return;
+      }
+
+      if (user.friends.includes(friendId)) {
+        alert('Este usuário já é seu amigo');
+        return;
+      }
+
+      await updateDoc(doc(db, 'users', user.uid), {
+        friends: arrayUnion(friendId)
+      });
+
+      await updateDoc(doc(db, 'users', friendId), {
+        friends: arrayUnion(user.uid)
+      });
+
+      setAddFriendID('');
+      setShowConnectionsModal(false);
+    } catch (error) {
+      console.error('Erro ao adicionar amigo:', error);
+      alert('Erro ao adicionar amigo');
+    }
+  };
+
+  const createGroup = async () => {
+    if (!groupName.trim() || selectedFriendsForGroup.length === 0 || !user) return;
+
+    try {
+      const groupData = {
+        name: groupName,
+        photoURL: groupPhotoURL,
+        members: [user.uid, ...selectedFriendsForGroup],
+        createdBy: user.uid,
+        createdAt: serverTimestamp(),
+      };
+
+      await addDoc(collection(db, 'groups'), groupData);
+      
+      setGroupName('');
+      setGroupPhotoURL('https://images.unsplash.com/photo-1522202176988-66273c2fd55f?w=150&h=150&fit=crop&crop=center');
+      setSelectedFriendsForGroup([]);
+      setShowConnectionsModal(false);
+    } catch (error) {
+      console.error('Erro ao criar grupo:', error);
+      alert('Erro ao criar grupo');
+    }
+  };
+
+  const removeFriend = async (friendId: string) => {
+    if (!user || !confirm('Tem certeza que deseja remover este amigo?')) return;
+
+    try {
+      await updateDoc(doc(db, 'users', user.uid), {
+        friends: arrayRemove(friendId)
+      });
+
+      await updateDoc(doc(db, 'users', friendId), {
+        friends: arrayRemove(user.uid)
+      });
+    } catch (error) {
+      console.error('Erro ao remover amigo:', error);
+      alert('Erro ao remover amigo');
+    }
+  };
+
+  const leaveGroup = async (groupId: string) => {
+    if (!user || !confirm('Tem certeza que deseja sair do grupo?')) return;
+
+    try {
+      const groupRef = doc(db, 'groups', groupId);
+      const groupDoc = await getDoc(groupRef);
+      
+      if (groupDoc.exists()) {
+        const groupData = groupDoc.data() as Group;
+        const updatedMembers = groupData.members.filter(id => id !== user.uid);
+        
+        if (updatedMembers.length === 0) {
+          await deleteDoc(groupRef);
+        } else {
+          await updateDoc(groupRef, {
+            members: updatedMembers
+          });
         }
+        
+        if (selectedChat?.id === groupId) {
+          setSelectedChat(null);
+        }
+      }
+    } catch (error) {
+      console.error('Erro ao sair do grupo:', error);
+      alert('Erro ao sair do grupo');
     }
   };
 
+  const getStatusColor = (userId: string) => {
+    const status = userStatuses[userId];
+    if (!status) return 'bg-gray-500';
+    
+    switch (status.state) {
+      case 'online': return 'bg-green-500';
+      case 'away': return 'bg-yellow-500';
+      case 'hidden': return 'bg-gray-500';
+      case 'offline': return 'bg-gray-500';
+      default: return 'bg-gray-500';
+    }
+  };
 
-  const ChatList = () => (
-    <div className="flex-1 overflow-y-auto scrollbar-hide">
-      <div className="p-2">
-        <h3 className="text-gray-400 text-sm font-medium mb-2 px-2">Conversas ({sortedChats.length})</h3>
-        {sortedChats.length === 0 ? (
-          <div className="text-center py-8">
-            <MessageCircle className="h-8 w-8 text-gray-600 mx-auto mb-2" />
-            <p className="text-gray-500 text-sm">Nenhuma conversa</p>
-            <p className="text-gray-600 text-xs">Adicione amigos para começar</p>
-          </div>
-        ) : (
-          <div className="space-y-1">
-            {sortedChats.map((chat) => {
-              const unreadCount = unreadCounts[chat.id] || 0;
-              return (
-                <div
-                  key={chat.id}
-                  className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors group ${
-                    selectedChat?.id === chat.id 
-                      ? 'bg-gray-700' 
-                      : 'hover:bg-gray-800'
-                  }`}
-                  onClick={() => selectChat(chat)}
-                >
-                  <div className="relative">
-                    <Avatar className="h-10 w-10">
-                      <AvatarImage src={chat.display_photo} />
-                      <AvatarFallback className="bg-gray-700 text-white">
-                        {chat.display_name?.charAt(0).toUpperCase() || '?'}
-                      </AvatarFallback>
-                    </Avatar>
-                    {!chat.isGroup && (() => {
-                      const friendUID = chat.members.find(uid => uid !== user?.uid);
-                      const friendStatus = friendUID ? getUserStatus(friendUID) : 'offline';
-                      return (
-                        <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-gray-900 flex items-center justify-center">
-                          <div className={`w-2 h-2 rounded-full ${getStatusColor(friendStatus)}`} />
-                        </div>
-                      );
-                    })()}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-white font-medium truncate">{chat.display_name}</h4>
-                      {chat.lastMessage && (
-                        <span className="text-gray-400 text-xs flex-shrink-0 ml-2">
-                          {chat.lastMessage.timestamp?.toDate?.().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) || ''}
-                        </span>
-                      )}
-                    </div>
-                    {chat.lastMessage && (
-                      <p className="text-gray-400 text-xs truncate">
-                        {chat.lastMessage.text}
-                      </p>
-                    )}
-                  </div>
-                  {unreadCount > 0 && (
-                     <Badge variant="destructive" className="flex-shrink-0">
-                       {unreadCount > 99 ? '99+' : unreadCount}
-                     </Badge>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'online': return <Circle className="h-3 w-3 fill-green-500 text-green-500" />;
+      case 'away': return <Clock className="h-3 w-3 text-yellow-500" />;
+      case 'hidden': return <Eye className="h-3 w-3 text-gray-500" />;
+      case 'offline': return <Circle className="h-3 w-3 fill-gray-500 text-gray-500" />;
+      default: return <Circle className="h-3 w-3 fill-gray-500 text-gray-500" />;
+    }
+  };
 
+  // Filtra as mensagens exibidas com base na searchQuery
+  const filteredMessagesForDisplay = useMemo(() => {
+    if (searchQuery.trim() === '') {
+      return messages;
+    }
 
-  if (loading) {
+    return messages.filter(message => {
+      // Decripta a mensagem para poder buscar no texto original
+      const decryptedText = selectedChat?.type === 'friend' && message.senderId !== user?.uid
+        ? decryptMessage(message.text, message.senderId, user.uid || '')
+        : selectedChat?.type === 'friend' && message.senderId === user?.uid
+        ? decryptMessage(message.text, user.uid || '', selectedChat.id)
+        : message.text;
+      
+      return decryptedText.toLowerCase().includes(searchQuery.toLowerCase());
+    });
+  }, [messages, searchQuery, selectedChat, user]);
+
+  if (!user) {
     return (
-      <div className="h-screen flex items-center justify-center bg-black">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto mb-4"></div>
-          <p className="text-gray-400">Carregando chat...</p>
+          <MessageCircle className="h-12 w-12 text-blue-500 mx-auto mb-4" />
+          <p className="text-slate-400">Carregando...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="h-screen [-webkit-app-region:no-drag] flex bg-black text-white overflow-hidden">
-      <MobileFriendsDrawer friendsCount={sortedChats.length}>
-        <div className="flex flex-col h-full overflow-hidden">
-            {/* User Info & Actions */}
-            <div className="p-4 border-b border-gray-700">
-                <div className="flex items-center gap-3 mb-3">
-                    <Avatar className="h-12 w-12 ring-2 ring-white">
-                        <AvatarImage src={user?.photoURL} />
-                        <AvatarFallback className="bg-gray-700 text-white">
-                        {user?.displayName?.charAt(0)}
-                        </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                            <h2 className="text-white font-semibold">{user?.displayName}</h2>
-                            <UserTags tags={user?.tags || []} />
-                        </div>
-                        <div className="flex items-center gap-1">
-                            <Badge variant="secondary" className="text-xs bg-green-600 text-white">
-                                {user?.userID}
-                            </Badge>
-                            <Button variant="ghost" size="sm" onClick={copyUserID} className="h-6 w-6 p-0 text-gray-400 hover:text-white hover:bg-gray-700" title="Copiar ID">
-                                {copiedUserID ? <Check className="h-3 w-3 text-green-400" /> : <Copy className="h-3 w-3" />}
-                            </Button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            {/* Add Friend & Group */}
-            <div className="p-4 border-b border-gray-700">
-              <div className="flex gap-2 mb-2">
-                <Input
-                  value={newFriendID}
-                  onChange={(e) => setNewFriendID(e.target.value)}
-                  placeholder="ID do amigo (ex: del#1234)"
-                  className="bg-gray-700 border-gray-600 text-white placeholder-gray-400"
-                  onKeyPress={(e) => { if (e.key === 'Enter') addFriend(); }}
-                />
-                <Button onClick={addFriend} disabled={addingFriend} className="bg-white text-black hover:bg-gray-200" title="Adicionar amigo">
-                  {addingFriend ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-black"></div> : <UserPlus className="h-4 w-4" />}
-                </Button>
+    <div className="min-h-screen flex [-webkit-app-region:no-drag]">
+      {/* Sidebar */}
+      <div className="w-80 bg-gray-900 border-r border-gray-700 flex flex-col">
+        {/* Header do usuário */}
+        <div className="p-4 border-b border-gray-700 bg-gray-800">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="relative">
+                <Avatar className="h-10 w-10">
+                  <AvatarImage src={user.photoURL} />
+                  <AvatarFallback>{user.displayName[0]}</AvatarFallback>
+                </Avatar>
+                <div className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-gray-800 ${getStatusColor(user.uid)}`}></div>
               </div>
-              <Button onClick={() => setShowGroupModal(true)} className="w-full bg-purple-600 hover:bg-purple-700 text-white" size="sm">
-                <Plus className="h-4 w-4 mr-2" />
-                Criar Grupo
+              <div className="flex-1 min-w-0">
+                <p className="text-white font-medium truncate">{user.displayName}</p>
+                <p className="text-gray-400 text-sm truncate">{user.userID}</p>
+                {/* Renderiza os emblemas do usuário logado aqui */}
+                {user.tags && user.tags.length > 0 && (
+                  <div className="mt-1">
+                    <UserTags tags={user.tags} size="sm" />
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center space-x-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setEditingProfile(!editingProfile)}
+                className="text-gray-400 hover:text-white hover:bg-gray-700"
+              >
+                <Settings className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => signOut(auth)}
+                className="text-gray-400 hover:text-white hover:bg-gray-700"
+              >
+                <LogOut className="h-4 w-4" />
               </Button>
             </div>
-            <ChatList />
+          </div>
         </div>
-      </MobileFriendsDrawer>
 
-      <div className="hidden sm:flex w-80 bg-gray-900 border-r border-gray-700 flex-col overflow-hidden">
-        {/* User Info & Actions */}
-        <div className="p-4 border-b border-gray-700">
-          <div className="flex items-center gap-3 mb-3">
-            <Avatar className="h-12 w-12 ring-2 ring-white">
-              <AvatarImage src={user?.photoURL} />
-              <AvatarFallback className="bg-gray-700 text-white">
-                {user?.displayName?.charAt(0)}
-              </AvatarFallback>
-            </Avatar>
-            <div className="flex-1">
-              <div className="flex items-center gap-2">
-                  <h2 className="text-white font-semibold">{user?.displayName}</h2>
-                  <UserTags tags={user?.tags || []} />
+        {/* Edição de perfil */}
+        {editingProfile && (
+          <div className="p-4 border-b border-gray-700 bg-gray-800">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-white text-sm font-medium">Editar Perfil</h3>
+            </div>
+            <div className="space-y-3">
+              <Input
+                value={newDisplayName}
+                onChange={(e) => setNewDisplayName(e.target.value)}
+                placeholder="Nome de exibição"
+                className="bg-gray-700 border-gray-600 text-white"
+              />
+              <div className="space-y-2">
+                <Label htmlFor="status-mode" className="text-white text-sm">
+                  Status de presença:
+                </Label>
+                <Select value={statusMode} onValueChange={(value: 'online' | 'offline' | 'hidden' | 'away') => setStatusMode(value)}>
+                  <SelectTrigger className="bg-gray-700 border-gray-600 text-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-gray-800 border-gray-600">
+                    <SelectItem value="online" className="text-white hover:bg-gray-700">
+                      <div className="flex items-center gap-2">
+                        <Circle className="h-3 w-3 fill-green-500 text-green-500" />
+                        Online
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="away" className="text-white hover:bg-gray-700">
+                      <div className="flex items-center gap-2">
+                        <Clock className="h-3 w-3 text-yellow-500" />
+                        Ausente
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="hidden" className="text-white hover:bg-gray-700">
+                      <div className="flex items-center gap-2">
+                        <Eye className="h-3 w-3 text-gray-500" />
+                        Oculto
+                      </div>
+                    </SelectItem>
+                    <SelectItem value="offline" className="text-white hover:bg-gray-700">
+                      <div className="flex items-center gap-2">
+                        <Circle className="h-3 w-3 fill-gray-500 text-gray-500" />
+                        Offline
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-              <div className="flex items-center gap-1">
-                  <Badge variant="secondary" className="text-xs bg-green-600 text-white">{user?.userID}</Badge>
-                  <Button variant="ghost" size="sm" onClick={copyUserID} className="h-6 w-6 p-0 text-gray-400 hover:text-white hover:bg-gray-700" title="Copiar ID">
-                    {copiedUserID ? <Check className="h-3 w-3 text-green-400" /> : <Copy className="h-3 w-3" />}
-                  </Button>
+              <Input
+                value={newPhotoURL}
+                onChange={(e) => setNewPhotoURL(e.target.value)}
+                placeholder="URL da foto"
+                className="bg-gray-700 border-gray-600 text-white"
+              />
+              {/* Opção para silenciar notificações */}
+              <div className="space-y-2">
+                <Label htmlFor="mute-notifications" className="text-white text-sm flex items-center justify-between">
+                  Silenciar Notificações
+                  <Switch
+                    id="mute-notifications"
+                    checked={isMuted}
+                    onCheckedChange={setIsMuted}
+                  />
+                </Label>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  onClick={updateProfile}
+                  disabled={savingProfile}
+                  className="bg-white text-black hover:bg-gray-200"
+                >
+                  <Save className="h-4 w-4 mr-1" />
+                  {savingProfile ? 'Salvando...' : 'Salvar'}
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => setEditingProfile(false)}
+                  disabled={savingProfile}
+                  className="bg-gray-600 text-white hover:bg-gray-500"
+                >
+                  <X className="h-4 w-4 mr-1" />
+                  Cancelar
+                </Button>
               </div>
             </div>
           </div>
-          <div className="flex gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setEditingProfile(!editingProfile)} className="text-gray-400 hover:text-white hover:bg-gray-800"><Settings className="h-4 w-4" /></Button>
-            <Button variant="ghost" size="sm" onClick={() => setSoundEnabled(!soundEnabled)} className="text-gray-400 hover:text-white hover:bg-gray-800">{soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}</Button>
-            {user?.isAdmin && (<Button variant="ghost" size="sm" onClick={() => router.push('/admin')} className="text-gray-400 hover:text-white hover:bg-gray-800"><Users className="h-4 w-4" /></Button>)}
-            <Button variant="ghost" size="sm" onClick={handleLogout} className="text-gray-400 hover:text-white hover:bg-gray-800"><LogOut className="h-4 w-4" /></Button>
-          </div>
+        )}
+
+        {/* Botão único para gerenciar conexões */}
+        <div className="p-4 border-b border-gray-700 space-y-2 bg-gray-800">
+          <Button
+            onClick={() => setShowConnectionsModal(true)}
+            className="w-full bg-white text-black hover:bg-gray-200 justify-start"
+          >
+            <Users className="h-4 w-4 mr-2" />
+            Gerenciar Conexões
+          </Button>
         </div>
 
-        {editingProfile && (
+        {/* Lista de amigos e grupos */}
+        <div className="flex-1 overflow-y-auto scrollbar-hide">
+          {/* Amigos */}
+          <div className="p-4">
+            <h3 className="text-gray-400 text-sm font-medium mb-3">AMIGOS ({friends.length})</h3>
+            <div className="space-y-2">
+              {friends.map((friend) => (
+                <div
+                  key={friend.uid}
+                  className={`flex items-center space-x-3 p-2 rounded-lg cursor-pointer hover:bg-gray-800 group ${
+                    selectedChat?.id === friend.uid ? 'bg-gray-800' : ''
+                  }`}
+                  onClick={() => setSelectedChat({type: 'friend', id: friend.uid, name: friend.displayName, photo: friend.photoURL})}
+                >
+                  <div className="relative">
+                    <Avatar className="h-8 w-8">
+                      <AvatarImage src={friend.photoURL} />
+                      <AvatarFallback>{friend.displayName[0]}</AvatarFallback>
+                    </Avatar>
+                    <div className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-gray-900 ${getStatusColor(friend.uid)}`}></div>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-white text-sm font-medium truncate">{friend.displayName}</p>
+                    <div className="flex items-center gap-1">
+                      {getStatusIcon(userStatuses[friend.uid]?.state || 'offline')}
+                      <p className="text-gray-400 text-xs">
+                        {userStatuses[friend.uid]?.state === 'online' ? 'Online' : 
+                         userStatuses[friend.uid]?.state === 'away' ? 'Ausente' :
+                         userStatuses[friend.uid]?.state === 'hidden' ? 'Oculto' : 'Offline'}
+                      </p>
+                    </div>
+                    {/* Renderiza os emblemas do amigo aqui */}
+                    {friend.tags && friend.tags.length > 0 && (
+                      <div className="mt-1">
+                        <UserTags tags={friend.tags} size="sm" />
+                      </div>
+                    )}
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeFriend(friend.uid);
+                    }}
+                    className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-300 hover:bg-red-900/20"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Grupos */}
+          <div className="p-4">
+            <h3 className="text-gray-400 text-sm font-medium mb-3">GRUPOS ({groups.length})</h3>
+            <div className="space-y-2">
+              {groups.map((group) => (
+                <div
+                  key={group.id}
+                  className={`flex items-center space-x-3 p-2 rounded-lg cursor-pointer hover:bg-gray-800 group ${
+                    selectedChat?.id === group.id ? 'bg-gray-800' : ''
+                  }`}
+                  onClick={() => setSelectedChat({type: 'group', id: group.id, name: group.name, photo: group.photoURL})}
+                >
+                  <div className="relative">
+                    <Avatar className="h-8 w-8">
+                      <AvatarImage src={group.photoURL} />
+                      <AvatarFallback>{group.name[0]}</AvatarFallback>
+                    </Avatar>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-white text-sm font-medium truncate">{group.name}</p>
+                    <p className="text-gray-400 text-xs">
+                      {onlineMembers[group.id] || 0} online • {group.members.length} membros
+                    </p>
+                  </div>
+                  {/* Botões de ação do grupo: Editar e Lixeira */}
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation(); // Previne que clique no item do grupo
+                        setEditingGroupDetails({ id: group.id, name: group.name, photoURL: group.photoURL });
+                        setNewGroupPhotoName(group.name);
+                        setNewGroupPhotoURL(group.photoURL);
+                      }}
+                      className="text-gray-400 hover:text-white hover:bg-gray-700"
+                    >
+                      <Edit className="h-4 w-4" /> {/* Ícone de edição */}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation(); // Previne que clique no item do grupo
+                        leaveGroup(group.id);
+                      }}
+                      className="text-red-400 hover:text-red-300 hover:bg-red-900/20"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Área principal do chat */}
+      <div className="flex-1 flex flex-col">
+        {selectedChat ? (
+          <>
+            {/* Header do chat */}
             <div className="p-4 border-b border-gray-700 bg-gray-800">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-white text-sm font-medium">Editar Perfil</h3>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <Avatar className="h-10 w-10">
+                    <AvatarImage src={selectedChat.photo} />
+                    <AvatarFallback>{selectedChat.name[0]}</AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <h2 className="text-white font-medium">{selectedChat.name}</h2>
+                    {selectedChat.type === 'group' && (
+                      <p className="text-gray-400 text-sm">
+                        {onlineMembers[selectedChat.id] || 0} online
+                      </p>
+                    )}
+                    {selectedChat.type === 'friend' && (
+                      <div className="flex items-center gap-1">
+                        {getStatusIcon(userStatuses[selectedChat.id]?.state || 'offline')}
+                        <p className="text-gray-400 text-sm">
+                          {userStatuses[selectedChat.id]?.state === 'online' ? 'Online' : 
+                           userStatuses[selectedChat.id]?.state === 'away' ? 'Ausente' :
+                           userStatuses[selectedChat.id]?.state === 'hidden' ? 'Oculto' : 'Offline'}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {/* Campo de busca de mensagens (agora toggleável e à direita) */}
+                <div className="relative flex items-center h-10">
+                  {!showSearchInput && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setShowSearchInput(true)}
+                      className="text-gray-400 hover:text-white"
+                    >
+                      <Search className="h-5 w-5" />
+                      <span className="sr-only">Abrir busca</span>
+                    </Button>
+                  )}
+
+                  {showSearchInput && (
+                    <div className="flex items-center relative max-w-xs w-full">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <Input
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="Buscar mensagens..."
+                        className="w-full pl-9 pr-8 bg-gray-700 border-gray-600 text-white placeholder-gray-400"
+                        autoFocus
+                        onBlur={() => {
+                          if (searchQuery.trim() === '') {
+                            setShowSearchInput(false);
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') {
+                            setShowSearchInput(false);
+                            setSearchQuery('');
+                          }
+                        }}
+                      />
+                      {searchQuery.length > 0 && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setSearchQuery('')}
+                          className="absolute right-0 top-1/2 -translate-y-1/2 h-7 w-7 text-gray-400 hover:text-white"
+                        >
+                          <X className="h-4 w-4" />
+                          <span className="sr-only">Limpar busca</span>
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="space-y-3">
+            </div>
+
+            {/* Mensagens */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide bg-gray-900">
+              {filteredMessagesForDisplay.map((message) => {
+                const isOwn = message.senderId === user.uid;
+                const displayText = selectedChat.type === 'friend' && !isOwn
+                  ? decryptMessage(message.text, message.senderId, user.uid)
+                  : selectedChat.type === 'friend' && isOwn
+                  ? decryptMessage(message.text, user.uid, selectedChat.id)
+                  : message.text;
+
+                return (
+                  <div
+                    key={message.id}
+                    className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}
+                  >
+                    <div className={`flex items-start space-x-2 max-w-xs lg:max-w-md ${isOwn ? 'flex-row-reverse space-x-reverse' : ''}`}>
+                      {!isOwn && selectedChat.type === 'group' && (
+                        <Avatar className="h-6 w-6">
+                          <AvatarImage src={message.senderPhoto} />
+                          <AvatarFallback>{message.senderName[0]}</AvatarFallback>
+                        </Avatar>
+                      )}
+                      <div className={`rounded-lg p-3 ${
+                        isOwn 
+                          ? 'bg-white text-black' 
+                          : 'bg-gray-800 text-white'
+                      }`}>
+                        {!isOwn && selectedChat.type === 'group' && (
+                          <p className="text-xs text-gray-400 mb-1">{message.senderName}</p>
+                        )}
+                        <p className="text-sm">{displayText}</p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              <div ref={messagesEndRef} />
+            </div>
+
+            {/* Input de mensagem */}
+            <div className="p-4 border-t border-gray-700 bg-gray-800">
+              <div className="flex space-x-2">
                 <Input
-                  value={newDisplayName}
-                  onChange={(e) => setNewDisplayName(e.target.value)}
-                  placeholder="Nome de exibição"
-                  className="bg-gray-700 border-gray-600 text-white"
+                  value={newMessage}
+                  onChange={(e) => setNewMessage(e.target.value)}
+                  placeholder="Digite sua mensagem..."
+                  className="flex-1 bg-gray-700 border-gray-600 text-white"
+                  onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
                 />
-                <Input
-                  value={newPhotoURL}
-                  onChange={(e) => setNewPhotoURL(e.target.value)}
-                  placeholder="URL da foto de perfil"
-                  className="bg-gray-700 border-gray-600 text-white"
-                />
-                <div className="space-y-2">
-                  <Label htmlFor="status-mode" className="text-white text-sm">
-                    Status de presença:
-                  </Label>
-                  <Select value={statusMode} onValueChange={(value: 'online' | 'offline' | 'hidden' | 'away') => setStatusMode(value)}>
-                    <SelectTrigger className="bg-gray-700 border-gray-600 text-white">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="bg-gray-800 border-gray-600">
-                      <SelectItem value="online" className="text-white hover:bg-gray-700">
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded-full bg-green-500" />
-                          Online
+                <Button onClick={sendMessage} className="bg-white text-black hover:bg-gray-200">
+                  <Send className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="flex-1 flex items-center justify-center bg-gray-900">
+            <div className="text-center">
+              <MessageCircle className="h-16 w-16 text-gray-600 mx-auto mb-4" />
+              <h3 className="text-xl font-medium text-white mb-2">Selecione um chat</h3>
+              <p className="text-gray-400">Escolha um amigo ou grupo para começar a conversar</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Modal unificado para gerenciar conexões */}
+      {showConnectionsModal && (
+        <Dialog open={showConnectionsModal} onOpenChange={setShowConnectionsModal}>
+          <DialogContent className="w-full max-w-md bg-gray-900 border border-gray-700 p-0">
+            <DialogHeader className="p-6 pb-0">
+              <DialogTitle className="text-white">Gerenciar Conexões</DialogTitle>
+            </DialogHeader>
+            <Tabs defaultValue="addFriend" className="w-full">
+              <TabsList className="grid w-full grid-cols-2 mb-4 bg-gray-800">
+                <TabsTrigger value="addFriend" className="text-white data-[state=active]:bg-gray-700">Adicionar Amigo</TabsTrigger>
+                <TabsTrigger value="createGroup" className="text-white data-[state=active]:bg-gray-700">Criar Grupo</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="addFriend" className="p-6 pt-0">
+                <div className="space-y-4">
+                  <div>
+                    <Label className="text-white text-sm">ID do usuário</Label>
+                    <Input
+                      value={addFriendID}
+                      onChange={(e) => setAddFriendID(e.target.value)}
+                      placeholder="del#1234"
+                      className="mt-1 bg-gray-800 border-gray-600 text-white placeholder-gray-400"
+                    />
+                    <p className="text-gray-400 text-xs mt-1">
+                      Digite o ID único do usuário (formato: del#1234)
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button onClick={addFriend} className="flex-1 bg-white text-black hover:bg-gray-200">
+                      Adicionar
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowConnectionsModal(false)}
+                      className="flex-1 border-gray-600 text-white hover:bg-gray-800"
+                    >
+                      Cancelar
+                    </Button>
+                  </div>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="createGroup" className="p-6 pt-0">
+                <div className="space-y-4">
+                  <div>
+                    <Label className="text-white text-sm">Nome do grupo</Label>
+                    <Input
+                      value={groupName}
+                      onChange={(e) => setGroupName(e.target.value)}
+                      placeholder="Nome do grupo"
+                      className="mt-1 bg-gray-800 border-gray-600 text-white placeholder-gray-400"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-white text-sm">Foto do grupo (URL)</Label>
+                    <Input
+                      value={groupPhotoURL}
+                      onChange={(e) => setGroupPhotoURL(e.target.value)}
+                      placeholder="URL da foto"
+                      className="mt-1 bg-gray-800 border-gray-600 text-white"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-white text-sm">Selecionar amigos</Label>
+                    <div className="mt-2 space-y-2 max-h-40 overflow-y-auto pr-2 scrollbar-hide">
+                      {friends.map((friend) => (
+                        <div key={friend.uid} className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id={`group-friend-${friend.uid}`}
+                            checked={selectedFriendsForGroup.includes(friend.uid)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedFriendsForGroup([...selectedFriendsForGroup, friend.uid]);
+                              } else {
+                                setSelectedFriendsForGroup(selectedFriendsForGroup.filter(id => id !== friend.uid));
+                              }
+                            }}
+                            className="rounded"
+                          />
+                          <label htmlFor={`group-friend-${friend.uid}`} className="text-white text-sm flex items-center space-x-2">
+                            <Avatar className="h-6 w-6">
+                              <AvatarImage src={friend.photoURL} />
+                              <AvatarFallback>{friend.displayName[0]}</AvatarFallback>
+                            </Avatar>
+                            <span>{friend.displayName}</span>
+                          </label>
                         </div>
-                      </SelectItem>
-                      <SelectItem value="away" className="text-white hover:bg-gray-700">
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded-full bg-yellow-500" />
-                          Ausente
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="hidden" className="text-white hover:bg-gray-700">
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded-full bg-gray-500" />
-                          Oculto
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="offline" className="text-white hover:bg-gray-700">
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded-full bg-gray-500" />
-                          Offline
-                        </div>
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex gap-2 mt-4">
+                    <Button 
+                      onClick={createGroup} 
+                      disabled={!groupName.trim() || selectedFriendsForGroup.length === 0}
+                      className="flex-1 bg-white text-black hover:bg-gray-200"
+                    >
+                      Criar Grupo
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowConnectionsModal(false)}
+                      className="flex-1 border-gray-600 text-white hover:bg-gray-800"
+                    >
+                      Cancelar
+                    </Button>
+                  </div>
+                </div>
+              </TabsContent>
+            </Tabs>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Modal para editar grupo (nome e foto) */}
+      {editingGroupDetails && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <Card className="w-full max-w-md mx-4 bg-gray-900 border-gray-700">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-white text-lg font-medium">Editar Grupo</h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setEditingGroupDetails(null);
+                    setNewGroupPhotoName('');
+                    setNewGroupPhotoURL('');
+                  }}
+                  className="text-gray-400 hover:text-white"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="space-y-4">
+                <div className="text-center">
+                  <Avatar className="h-20 w-20 mx-auto mb-4">
+                    <AvatarImage src={newGroupPhotoURL} />
+                    <AvatarFallback>
+                      {editingGroupDetails?.name[0] || groups.find(g => g.id === editingGroupDetails?.id)?.name[0]}
+                    </AvatarFallback>
+                  </Avatar>
+                </div>
+                <div>
+                  <Label className="text-white text-sm">Nome do grupo</Label>
+                  <Input
+                    value={newGroupPhotoName}
+                    onChange={(e) => setNewGroupPhotoName(e.target.value)}
+                    placeholder="Nome do grupo"
+                    className="mt-1 bg-gray-800 border-gray-600 text-white"
+                  />
+                </div>
+                <div>
+                  <Label className="text-white text-sm">URL da foto do grupo</Label>
+                  <Input
+                    value={newGroupPhotoURL}
+                    onChange={(e) => setNewGroupPhotoURL(e.target.value)}
+                    placeholder="URL da nova foto"
+                    className="mt-1 bg-gray-800 border-gray-600 text-white"
+                  />
                 </div>
                 <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    onClick={updateProfile}
-                    disabled={savingProfile}
-                    className="bg-white text-black hover:bg-gray-200"
+                  <Button 
+                    onClick={updateGroupDetails}
+                    disabled={!newGroupPhotoName.trim() || !newGroupPhotoURL.trim()}
+                    className="flex-1 bg-white text-black hover:bg-gray-200"
                   >
-                    <Save className="h-4 w-4 mr-1" />
-                    {savingProfile ? 'Salvando...' : 'Salvar'}
+                    <Check className="h-4 w-4 mr-1" />
+                    Salvar
                   </Button>
                   <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setEditingProfile(false)}
-                    disabled={savingProfile}
-                    className="border-gray-600 text-white hover:bg-gray-800"
+                    onClick={() => {
+                      setEditingGroupDetails(null);
+                      setNewGroupPhotoName('');
+                      setNewGroupPhotoURL('');
+                    }}
+                    className="flex-1 bg-gray-600 text-white hover:bg-gray-500"
                   >
                     <X className="h-4 w-4 mr-1" />
                     Cancelar
                   </Button>
                 </div>
               </div>
-            </div>
-        )}
-
-        {/* Add Friend & Group */}
-        <div className="p-4 border-b border-gray-700">
-          <div className="flex gap-2 mb-2">
-            <Input value={newFriendID} onChange={(e) => setNewFriendID(e.target.value)} placeholder="ID do amigo (ex: del#1234)" className="bg-gray-700 border-gray-600 text-white" onKeyPress={(e) => { if (e.key === 'Enter') addFriend(); }}/>
-            <Button onClick={addFriend} disabled={addingFriend} className="bg-white text-black hover:bg-gray-200" title="Adicionar amigo">
-              {addingFriend ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-black"></div> : <UserPlus className="h-4 w-4" />}
-            </Button>
-          </div>
-          <Button onClick={() => setShowGroupModal(true)} className="w-full bg-purple-600 hover:bg-purple-700 text-white" size="sm">
-            <Plus className="h-4 w-4 mr-2" />
-            Criar Grupo
-          </Button>
+            </CardContent>
+          </Card>
         </div>
-
-        <ChatList />
-      </div>
-
-      <div className="flex-1 flex flex-col min-w-0 h-screen sm:h-auto">
-        {selectedChat ? (
-          <>
-            <div className="bg-gray-900 border-b border-gray-700 p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <Avatar className="h-10 w-10">
-                    <AvatarImage src={selectedChat.display_photo} />
-                    <AvatarFallback className="bg-gray-700 text-white">{selectedChat.display_name?.charAt(0)}</AvatarFallback>
-                  </Avatar>
-                  <div>
-                    {isEditingGroupName ? (
-                      <div className="flex items-center gap-2">
-                        <Input
-                          value={newGroupName}
-                          onChange={(e) => setNewGroupName(e.target.value)}
-                          className="bg-gray-700 border-gray-600 text-white h-8"
-                          onKeyPress={(e) => { if (e.key === 'Enter') handleUpdateGroupName(); }}
-                        />
-                        <Button onClick={handleUpdateGroupName} size="sm"><Check className="h-4 w-4"/></Button>
-                        <Button onClick={() => setIsEditingGroupName(false)} variant="ghost" size="sm"><X className="h-4 w-4"/></Button>
-                      </div>
-                    ) : (
-                      <h2 className="text-white font-semibold flex items-center gap-2">
-                        {selectedChat.display_name}
-                        {selectedChat.isGroup && (
-                          <Button onClick={() => setIsEditingGroupName(true)} variant="ghost" size="sm" className="text-gray-400 hover:text-white"><Edit className="h-4 w-4"/></Button>
-                        )}
-                      </h2>
-                    )}
-                    {!selectedChat.isGroup && selectedFriend && (
-                        <div className="flex items-center gap-2">
-                          <p className="text-gray-400 text-sm">{selectedFriend.userID}</p>
-                          {(() => {
-                            const friendStatus = getUserStatus(selectedFriend.uid);
-                            return (
-                              <div className="flex items-center gap-2">
-                                <div className={`w-2 h-2 rounded-full ${getStatusColor(friendStatus)}`} />
-                                <span className="text-xs text-gray-400 capitalize">{friendStatus}</span>
-                              </div>
-                            );
-                          })()}
-                          <UserTags tags={selectedFriend.tags || []} size="sm" />
-                        </div>
-                    )}
-                    {selectedChat.isGroup && (
-                      <div className="flex items-center gap-2">
-                        <div className="flex items-center gap-1">
-                          <div className="w-2 h-2 rounded-full bg-green-500" />
-                          <span className="text-xs text-gray-400">{groupOnlineCount} online</span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="sm" onClick={() => setShowSearch(!showSearch)} className="text-gray-400 hover:text-white hover:bg-gray-800"><Search className="h-4 w-4" /></Button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="sm"><MoreVertical className="h-4 w-4" /></Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent className="bg-gray-800 border-gray-700 text-white">
-                      {selectedChat.isGroup && selectedChat.createdBy === user?.uid && (
-                        <DropdownMenuItem onSelect={handleDeleteConversation} className="text-red-400 hover:!bg-red-500/20">
-                          <Trash2 className="h-4 w-4 mr-2"/> Excluir Grupo
-                        </DropdownMenuItem>
-                      )}
-                      {!selectedChat.isGroup && (
-                          <DropdownMenuItem onSelect={handleDeleteConversation} className="text-red-400 hover:!bg-red-500/20">
-                            <Trash2 className="h-4 w-4 mr-2"/> Excluir Conversa
-                          </DropdownMenuItem>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
-              {showSearch && (
-                  <div className="mt-3">
-                      <Input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Pesquisar mensagens..." className="bg-gray-700 border-gray-600 text-white"/>
-                  </div>
-              )}
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-800 scrollbar-hide">
-              {filteredMessages.map((message) => (
-                <div key={message.id} className={`flex ${message.userId === user?.uid ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[70%] rounded-lg p-3 relative group ${message.userId === user?.uid ? 'bg-white text-black' : 'bg-gray-700 text-white'}`}>
-                    {message.userId !== user?.uid && (
-                      <div className="flex items-center gap-2 mb-2">
-                        <Avatar className="h-6 w-6"><AvatarImage src={message.userPhoto} /></Avatar>
-                        <span className="text-sm text-gray-300">{message.userName}</span>
-                      </div>
-                    )}
-                    {message.isImage ? <img src={message.text} alt="Imagem" className="max-w-full h-auto rounded-lg"/> : <p className="break-words">{message.text}</p>}
-                    <ReactionPills reactions={message.reactions || {}} onReactionClick={(emoji) => handleReaction(message, emoji)} currentUserId={user?.uid || ''} />
-                    <div className="flex items-center justify-between mt-1">
-                        <p className={`text-xs ${message.userId === user?.uid ? 'text-gray-600' : 'text-gray-400'}`}>{message.timestamp?.toDate?.().toLocaleTimeString() || '...'}</p>
-                        {message.userId === user?.uid && <MessageStatusIcon message={message} currentUser={user} selectedFriend={selectedFriend} />}
-                    </div>
-                    <ReactionPopover onReactionSelect={(emoji) => handleReaction(message, emoji)} />
-                  </div>
-                </div>
-              ))}
-              {isFriendTyping && <div className="text-sm text-gray-400">...digitando</div>}
-              <div ref={messagesEndRef} />
-            </div>
-
-            <div className="bg-gray-900 border-t border-gray-700 p-4">
-              <form onSubmit={sendMessage} className="flex gap-2">
-                <Input value={newMessage} onChange={(e) => { setNewMessage(e.target.value); handleTyping(); }} placeholder="Digite sua mensagem..." className="flex-1 bg-gray-700 border-gray-600 text-white" />
-                <Button type="submit" disabled={!newMessage.trim()} className="bg-white text-black hover:bg-gray-200"><Send className="h-4 w-4" /></Button>
-              </form>
-            </div>
-          </>
-        ) : (
-          <div className="flex-1 flex items-center justify-center bg-gray-800 p-4">
-            <div className="text-center">
-              <MessageCircle className="h-16 w-16 text-gray-600 mx-auto mb-4" />
-              <h2 className="text-xl font-semibold text-white mb-2">Selecione uma conversa</h2>
-              <p className="text-gray-400 text-center">Escolha uma conversa da lista para começar a conversar</p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {showGroupModal && (
-        <GroupChatModal
-          friends={friends}
-          onClose={() => setShowGroupModal(false)}
-          onCreateGroup={createGroupChat}
-        />
       )}
     </div>
   );

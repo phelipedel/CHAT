@@ -1,3 +1,4 @@
+// Nova pasta (4)/app/(main)/layout.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -6,6 +7,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { isAdminUID } from '@/lib/config';
 import { Loader2 } from 'lucide-react';
+import { Toaster } from '@/components/ui/toaster'; // Importe o Toaster
 
 export default function MainLayout({
   children,
@@ -52,5 +54,10 @@ export default function MainLayout({
     return null;
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      {children}
+      <Toaster /> {/* Adicione o componente Toaster aqui */}
+    </>
+  );
 }
